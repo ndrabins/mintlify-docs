@@ -1,0 +1,333 @@
+---
+title: "Edges"
+description: "Defining the flow between nodes in LangGraph.js"
+---
+
+## What are Edges?
+
+Edges define the flow of execution between nodes in a LangGraph.js graph. They determine:
+
+1. Which node executes after the current node completes
+2. Under what conditions a particular path is followed
+3. How the graph branches and merges
+
+<Frame>
+  <img src="/images/langgraph-edges-diagram.png" alt="Edges Diagram" />
+</Frame>
+
+Edges are what turn a collection of nodes into a coherent workflow. They allow you to create linear sequences, branches, loops, and complex conditional flows.
+
+## Types of Edges
+
+LangGraph.js supports two main types of edges:
+
+1. **Static Edges**: Always follow the same path
+2. **Conditional Edges**: Choose a path based on the state
+
+## Static Edges
+
+Static edges create a fixed path between nodes. They're added using the `addEdge` method:
+
+```typescript
+// Connect "node_a" to "node_b"
+builder.addEdge("node_a", "node_b");
+
+// Connect "node_b" to "node_c"
+builder.addEdge("node_b", "node_c");
+```
+
+This creates a linear flow: `node_a` → `node_b` → `node_c`.
+
+## Special Node Identifiers
+
+LangGraph.js provides two special node identifiers:
+
+- `"start"`: The entry point of the graph
+- `END`: The exit point of the graph
+
+```typescript
+import { END } from "@langchain/langgraph";
+
+// Connect the first node to the start
+builder.addEdge("start", "first_node");
+
+// Connect the last node to the end
+builder.addEdge("last_node", END);
+```
+
+Every graph must have at least one edge from `"start"` and one edge to `END`.
+
+## Conditional Edges
+
+Conditional edges choose a path based on the current state. They're added using the `addConditionalEdges` method:
+
+```typescript
+builder.addConditionalEdges(
+  "router_node", // Source node
+  (state) => {
+    // Condition function
+    if (state.context.needsSearch) {
+      return "search";
+    } else if (state.context.needsCalculation) {
+      return "calculate";
+    } else {
+      return "respond";
+    }
+  },
+  {
+    // Routes
+    search: "search_tool",
+    calculate: "calculator_tool",
+    respond: "generate_response",
+  }
+);
+```
+
+The `addConditionalEdges` method takes three arguments:
+
+1. The source node
+2. A condition function that returns a string key
+3. A routes object mapping keys to destination nodes
+
+## Condition Functions
+
+The condition function receives the current state and returns a string key that determines which path to follow:
+
+```typescript
+(state) => {
+  // Examine the state
+  const intent = state.context.intent;
+
+  // Return a key that matches one of the routes
+  return intent;
+};
+```
+
+The returned key must match one of the keys in the routes object. If it doesn't, an error will be thrown.
+
+## Simplified Condition Functions
+
+For simple conditions, you can return a property of the state directly:
+
+```typescript
+// If state.context.nextStep contains the route key
+builder.addConditionalEdges("router", (state) => state.context.nextStep, {
+  search: "search_tool",
+  calculate: "calculator_tool",
+  respond: "generate_response",
+});
+```
+
+## Ending the Graph
+
+To end the graph from a conditional edge, use the `END` constant:
+
+```typescript
+import { END } from "@langchain/langgraph";
+
+builder.addConditionalEdges(
+  "final_router",
+  (state) => (state.context.shouldEnd ? "end" : "continue"),
+  {
+    end: END,
+    continue: "next_node",
+  }
+);
+```
+
+## Creating Loops
+
+You can create loops by adding an edge that points back to a previous node:
+
+```typescript
+// Create a loop from "check_condition" to "process_item"
+builder.addConditionalEdges(
+  "check_condition",
+  (state) => (state.context.hasMoreItems ? "continue" : "done"),
+  {
+    continue: "process_item", // Loop back
+    done: "finish",
+  }
+);
+
+// Connect "process_item" to "check_condition"
+builder.addEdge("process_item", "check_condition");
+```
+
+This creates a loop: `check_condition` → `process_item` → `check_condition` → ...
+
+## Branching and Merging
+
+You can create branches by having multiple edges from a single node, and merge them by having multiple edges to a single node:
+
+```typescript
+// Branching
+builder.addConditionalEdges("router", (state) => state.context.route, {
+  a: "branch_a",
+  b: "branch_b",
+  c: "branch_c",
+});
+
+// Merging
+builder.addEdge("branch_a", "aggregator");
+builder.addEdge("branch_b", "aggregator");
+builder.addEdge("branch_c", "aggregator");
+```
+
+When paths merge, the states from each path are combined using the channel merge functions.
+
+## Parallel Execution
+
+LangGraph.js doesn't natively support parallel execution within a single graph invocation. However, you can simulate parallel execution by:
+
+1. Branching the graph
+2. Running each branch separately
+3. Merging the results
+
+```typescript
+// Create branches
+builder.addConditionalEdges("router", (state) => state.context.route, {
+  a: "branch_a",
+  b: "branch_b",
+});
+
+// Each branch does its work
+builder.addNode("branch_a", {
+  /* ... */
+});
+builder.addNode("branch_b", {
+  /* ... */
+});
+
+// Merge the results
+builder.addEdge("branch_a", "aggregator");
+builder.addEdge("branch_b", "aggregator");
+
+// Aggregator combines the results
+builder.addNode("aggregator", {
+  execute: async (state) => {
+    // The state here will have the combined results from both branches
+    // thanks to the channel merge functions
+    return {
+      context: {
+        combinedResults: true,
+      },
+    };
+  },
+});
+```
+
+## Complex Routing Patterns
+
+You can create complex routing patterns by combining static and conditional edges:
+
+### State Machine
+
+```typescript
+// Define a state machine with different states
+builder.addConditionalEdges(
+  "state_router",
+  (state) => state.context.currentState,
+  {
+    idle: "idle_handler",
+    processing: "processing_handler",
+    error: "error_handler",
+    complete: "complete_handler",
+  }
+);
+
+// Each handler updates the state and routes back to the router
+builder.addNode("idle_handler", {
+  execute: async (state) => {
+    return {
+      context: {
+        currentState: "processing",
+      },
+    };
+  },
+});
+
+builder.addEdge("idle_handler", "state_router");
+builder.addEdge("processing_handler", "state_router");
+builder.addEdge("error_handler", "state_router");
+builder.addEdge("complete_handler", END);
+```
+
+### Multi-Step Process
+
+```typescript
+// Define a multi-step process
+builder.addEdge("start", "step1");
+builder.addEdge("step1", "step2");
+
+// Conditional check after step2
+builder.addConditionalEdges(
+  "step2",
+  (state) => (state.context.step2Success ? "success" : "retry"),
+  {
+    success: "step3",
+    retry: "step2", // Loop back to retry
+  }
+);
+
+builder.addEdge("step3", END);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Plan your graph flow">
+    Sketch out the flow of your graph before implementing it. This helps you
+    identify the nodes and edges you need.
+  </Accordion>
+
+  <Accordion title="Use descriptive route keys">
+    Choose clear, descriptive keys for your conditional routes. This makes your
+    graph easier to understand and debug.
+  </Accordion>
+
+  <Accordion title="Avoid complex condition functions">
+    Keep your condition functions simple. If the logic is complex, move it to a
+    node and store the result in the state.
+  </Accordion>
+
+  <Accordion title="Be careful with loops">
+    Ensure that loops have a clear exit condition to prevent infinite loops.
+  </Accordion>
+
+  <Accordion title="Handle all possible routes">
+    Make sure your conditional edges handle all possible states. Include a
+    default or fallback route when appropriate.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you understand Edges, learn about:
+
+<CardGroup cols={2}>
+  <Card title="State" icon="database" href="/langgraph-js/core-concepts/state">
+    Learn about state management in LangGraph.js
+  </Card>
+  <Card
+    title="Nodes"
+    icon="circle-nodes"
+    href="/langgraph-js/core-concepts/nodes"
+  >
+    Dive deeper into node types and patterns
+  </Card>
+  <Card
+    title="Channels"
+    icon="sitemap"
+    href="/langgraph-js/core-concepts/channels"
+  >
+    Understand how state is managed and merged
+  </Card>
+  <Card
+    title="Branching and Merging"
+    icon="code-branch"
+    href="/langgraph-js/advanced/branching-merging"
+  >
+    Explore advanced branching and merging patterns
+  </Card>
+</CardGroup>{" "}

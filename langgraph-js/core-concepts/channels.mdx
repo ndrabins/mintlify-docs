@@ -1,0 +1,264 @@
+---
+title: "Channels"
+description: "How state is managed and merged in LangGraph.js"
+---
+
+## What are Channels?
+
+Channels are a core concept in LangGraph.js that define how state is managed and merged throughout graph execution. They provide a structured way to:
+
+1. Define the initial (default) values for each part of your state
+2. Specify how values should be combined when multiple paths converge
+3. Ensure type safety for your state management
+
+<Frame>
+  <img src="/images/langgraph-channels-diagram.png" alt="Channels Diagram" />
+</Frame>
+
+## Defining Channels
+
+When creating a StateGraph, you define channels for each property in your state:
+
+```typescript
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+  context: Record<string, any>;
+  tools: ToolInterface[];
+};
+
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y], // Merge function
+      default: () => [], // Default value
+    },
+    context: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({}),
+    },
+    tools: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+```
+
+Each channel has two key components:
+
+- **`default`**: A function that returns the initial value for this part of the state
+- **`value`**: A function that defines how to merge values when paths converge
+
+## Merge Functions
+
+The `value` function is called when multiple paths in your graph converge, and you need to combine the state from different branches. It takes two arguments:
+
+- `x`: The existing value in the state
+- `y`: The new value to be merged
+
+The function should return the combined value. Here are common merge patterns:
+
+### Array Concatenation
+
+For arrays, you typically want to concatenate the values:
+
+```typescript
+// For message arrays
+messages: {
+  value: (x, y) => [...x, ...y],
+  default: () => [],
+}
+```
+
+### Object Merging
+
+For objects, you typically want to merge the properties:
+
+```typescript
+// For context objects
+context: {
+  value: (x, y) => ({ ...x, ...y }),
+  default: () => ({}),
+}
+```
+
+### Value Replacement
+
+Sometimes you want to replace the old value with the new one:
+
+```typescript
+// For single values that should be replaced
+currentStep: {
+  value: (x, y) => y,
+  default: () => "start",
+}
+```
+
+### Custom Merging Logic
+
+You can implement more complex merging logic as needed:
+
+```typescript
+// For a counter that should be incremented
+counter: {
+  value: (x, y) => x + y,
+  default: () => 0,
+}
+
+// For a set of unique items
+uniqueItems: {
+  value: (x, y) => Array.from(new Set([...x, ...y])),
+  default: () => [],
+}
+```
+
+## Default Values
+
+The `default` function is called to initialize a part of the state when it's not provided in the initial state. It should return the default value for that part of the state.
+
+```typescript
+// Default empty array
+messages: {
+  value: (x, y) => [...x, ...y],
+  default: () => [],
+}
+
+// Default empty object
+context: {
+  value: (x, y) => ({ ...x, ...y }),
+  default: () => ({}),
+}
+
+// Default with predefined values
+tools: {
+  value: (x, y) => [...x, ...y],
+  default: () => [new Calculator(), new WebSearch()],
+}
+```
+
+## Channel Behavior During Execution
+
+Understanding how channels behave during graph execution is important:
+
+1. **Initial State**: When you invoke a graph, any state properties not provided are initialized with their default values.
+
+2. **Node Execution**: Each node receives the current state and returns a partial state with updates.
+
+3. **State Updates**: After a node executes, the returned partial state is merged with the existing state using the channel merge functions.
+
+4. **Branching**: When the graph branches, each path gets a copy of the current state.
+
+5. **Merging**: When paths converge, the states from each path are merged using the channel merge functions.
+
+## Example: Message Management
+
+Here's a practical example of using channels to manage conversation messages:
+
+```typescript
+type ConversationState = {
+  messages: (HumanMessage | AIMessage)[];
+  userMessages: HumanMessage[];
+  aiMessages: AIMessage[];
+};
+
+const builder = new StateGraph<ConversationState>({
+  channels: {
+    // All messages
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    // Only user messages
+    userMessages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    // Only AI messages
+    aiMessages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+
+// Node that processes user input
+builder.addNode("process_user_input", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() === "human") {
+      return {
+        userMessages: [lastMessage as HumanMessage],
+      };
+    }
+    return {};
+  },
+});
+
+// Node that generates AI response
+builder.addNode("generate_response", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({});
+    const response = await model.invoke(state.messages);
+    return {
+      aiMessages: [response],
+      messages: [response],
+    };
+  },
+});
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep merge functions pure">
+    Merge functions should be pure and deterministic, without side effects. They
+    should only combine the values and return the result.
+  </Accordion>
+
+  <Accordion title="Use appropriate merge strategies">
+    Choose the right merge strategy for each part of your state. Arrays
+    typically use concatenation, objects use property merging, and single values
+    often use replacement.
+  </Accordion>
+
+  <Accordion title="Consider performance">
+    For large state objects, be mindful of performance in your merge functions.
+    Deep cloning large objects can be expensive.
+  </Accordion>
+
+  <Accordion title="Handle edge cases">
+    Make sure your merge functions handle edge cases like null or undefined
+    values gracefully.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you understand Channels, learn about:
+
+<CardGroup cols={2}>
+  <Card
+    title="Nodes"
+    icon="circle-nodes"
+    href="/langgraph-js/core-concepts/nodes"
+  >
+    Dive deeper into node types and patterns
+  </Card>
+  <Card
+    title="Edges"
+    icon="arrow-right"
+    href="/langgraph-js/core-concepts/edges"
+  >
+    Explore different types of edges and routing
+  </Card>
+  <Card title="State" icon="database" href="/langgraph-js/core-concepts/state">
+    Learn about state management in LangGraph.js
+  </Card>
+  <Card
+    title="Advanced Features"
+    icon="wand-magic-sparkles"
+    href="/langgraph-js/advanced/branching-merging"
+  >
+    Explore advanced features like branching and merging
+  </Card>
+</CardGroup>{" "}

@@ -1,0 +1,252 @@
+---
+title: "Quick Start"
+description: "Build your first LangGraph.js application in minutes"
+---
+
+This guide will help you create your first LangGraph.js application - a simple conversational agent that can respond to user messages.
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+1. Installed LangGraph.js (see [Installation](/langgraph-js/installation))
+2. Set up an OpenAI API key (or another LLM provider)
+
+## Step 1: Set Up Your Project
+
+Create a new directory for your project and initialize it:
+
+```bash
+mkdir langgraph-quickstart
+cd langgraph-quickstart
+npm init -y
+npm install @langchain/langgraph @langchain/openai @langchain/core
+```
+
+Create a new file called `index.ts`:
+
+## Step 2: Create a Simple Conversational Agent
+
+Copy the following code into your `index.ts` file:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+
+// Set your OpenAI API key
+// You can also use environment variables: process.env.OPENAI_API_KEY
+const OPENAI_API_KEY = "your-api-key-here";
+
+// Define the state type for our graph
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+};
+
+async function main() {
+  // Create a new graph
+  const builder = new StateGraph<AgentState>({
+    channels: {
+      // Define how messages are combined and their default value
+      messages: {
+        value: (x, y) => [...x, ...y],
+        default: () => [],
+      },
+    },
+  });
+
+  // Add a node to the graph that will process messages using an LLM
+  builder.addNode("agent", {
+    execute: async (state) => {
+      // Initialize the ChatOpenAI model
+      const model = new ChatOpenAI({
+        openAIApiKey: OPENAI_API_KEY,
+        modelName: "gpt-3.5-turbo",
+        temperature: 0.7,
+      });
+
+      // Call the model with the current messages
+      const response = await model.invoke(state.messages);
+
+      // Return the updated state with the new AI message
+      return { messages: [response] };
+    },
+  });
+
+  // Define the flow: start -> agent -> end
+  builder.addEdge("start", "agent");
+  builder.addEdge("agent", END);
+
+  // Compile the graph
+  const graph = builder.compile();
+
+  // Run the graph with an initial message
+  const result = await graph.invoke({
+    messages: [new HumanMessage("Hello, who are you?")],
+  });
+
+  // Print the conversation
+  for (const message of result.messages) {
+    if (message._getType() === "human") {
+      console.log(`Human: ${message.content}`);
+    } else {
+      console.log(`AI: ${message.content}`);
+    }
+  }
+}
+
+main().catch(console.error);
+```
+
+## Step 3: Run Your Application
+
+Replace `"your-api-key-here"` with your actual OpenAI API key, then run the application:
+
+```bash
+npx tsx index.ts
+```
+
+You should see output similar to:
+
+```
+Human: Hello, who are you?
+AI: Hello! I'm an AI assistant created by OpenAI. I'm here to help answer questions, provide information, and assist with various tasks to the best of my abilities. How can I help you today?
+```
+
+## Step 4: Add Multi-Turn Conversation
+
+Let's modify our application to support multiple conversation turns:
+
+```typescript
+// ... previous imports and setup ...
+
+async function main() {
+  // ... previous graph setup ...
+
+  // Compile the graph
+  const graph = builder.compile();
+
+  // Initial conversation
+  let state = await graph.invoke({
+    messages: [new HumanMessage("Hello, who are you?")],
+  });
+
+  // Print the first exchange
+  printConversation(state.messages);
+
+  // Continue the conversation
+  state = await graph.invoke({
+    messages: [
+      ...state.messages,
+      new HumanMessage("Can you write a short poem about coding?"),
+    ],
+  });
+
+  // Print the updated conversation
+  printConversation(state.messages);
+}
+
+function printConversation(messages: (HumanMessage | AIMessage)[]) {
+  for (const message of messages) {
+    if (message._getType() === "human") {
+      console.log(`Human: ${message.content}`);
+    } else {
+      console.log(`AI: ${message.content}`);
+    }
+  }
+  console.log("---");
+}
+
+main().catch(console.error);
+```
+
+Run the application again to see the multi-turn conversation.
+
+## Step 5: Add Checkpointing for Persistence
+
+Let's add checkpointing to persist the conversation state:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { InMemoryCheckpointer } from "@langchain/langgraph/checkpointers";
+
+// ... previous setup ...
+
+async function main() {
+  // ... previous graph setup ...
+
+  // Create a checkpointer
+  const checkpointer = new InMemoryCheckpointer();
+
+  // Compile the graph with the checkpointer
+  const graph = builder.compile({
+    checkpointer,
+  });
+
+  // Create a unique thread ID for this conversation
+  const threadId = "conversation-" + Date.now();
+
+  // First turn
+  let state = await graph.invoke(
+    {
+      messages: [new HumanMessage("Hello, who are you?")],
+    },
+    { configurable: { thread_id: threadId } }
+  );
+
+  printConversation(state.messages);
+
+  // Second turn - the state will be loaded from the checkpointer
+  state = await graph.invoke(
+    {
+      messages: [new HumanMessage("Can you write a short poem about coding?")],
+    },
+    { configurable: { thread_id: threadId } }
+  );
+
+  printConversation(state.messages);
+
+  // You can list all thread IDs
+  const threads = await checkpointer.list();
+  console.log("Active threads:", threads);
+}
+
+// ... rest of the code ...
+```
+
+## Next Steps
+
+Congratulations! You've built your first LangGraph.js application. Here are some ways to expand on this foundation:
+
+<CardGroup cols={2}>
+  <Card
+    title="Add Tools"
+    icon="wrench"
+    href="/langgraph-js/examples/conversational-agent"
+  >
+    Enhance your agent with tools like web search or calculations
+  </Card>
+  <Card
+    title="Multi-Agent Systems"
+    icon="users"
+    href="/langgraph-js/advanced/multi-agent-systems"
+  >
+    Create systems with multiple specialized agents
+  </Card>
+  <Card
+    title="Human-in-the-Loop"
+    icon="user"
+    href="/langgraph-js/advanced/human-in-the-loop"
+  >
+    Add human feedback and intervention to your workflows
+  </Card>
+  <Card
+    title="Core Concepts"
+    icon="brain"
+    href="/langgraph-js/core-concepts/state-graph"
+  >
+    Dive deeper into LangGraph.js concepts
+  </Card>
+</CardGroup>{" "}

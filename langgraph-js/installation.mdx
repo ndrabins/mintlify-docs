@@ -1,0 +1,145 @@
+---
+title: "Installation"
+description: "How to install LangGraph.js in your project"
+---
+
+## Requirements
+
+Before installing LangGraph.js, ensure your environment meets the following requirements:
+
+- **Node.js**: Version 18 or higher
+- **Package Manager**: npm, yarn, or pnpm
+
+## Installation
+
+You can install LangGraph.js using your preferred package manager:
+
+<CodeGroup>
+```bash npm
+npm install @langchain/langgraph
+```
+
+```bash yarn
+yarn add @langchain/langgraph
+```
+
+```bash pnpm
+pnpm add @langchain/langgraph
+```
+
+</CodeGroup>
+
+## Related Packages
+
+LangGraph.js works well with other LangChain packages. Depending on your use case, you might want to install these additional packages:
+
+<CodeGroup>
+```bash npm
+# Core LangChain functionality
+npm install @langchain/core
+
+# OpenAI integration
+
+npm install @langchain/openai
+
+# Anthropic integration
+
+npm install @langchain/anthropic
+
+# Community tools and integrations
+
+npm install @langchain/community
+
+````
+
+```bash yarn
+# Core LangChain functionality
+yarn add @langchain/core
+
+# OpenAI integration
+yarn add @langchain/openai
+
+# Anthropic integration
+yarn add @langchain/anthropic
+
+# Community tools and integrations
+yarn add @langchain/community
+````
+
+```bash pnpm
+# Core LangChain functionality
+pnpm add @langchain/core
+
+# OpenAI integration
+pnpm add @langchain/openai
+
+# Anthropic integration
+pnpm add @langchain/anthropic
+
+# Community tools and integrations
+pnpm add @langchain/community
+```
+
+</CodeGroup>
+
+## Verifying Installation
+
+You can verify your installation by creating a simple test file:
+
+```typescript
+// test.ts
+import { StateGraph } from "@langchain/langgraph";
+
+// Define a simple state type
+type SimpleState = {
+  count: number;
+};
+
+// Create a new graph
+const builder = new StateGraph<SimpleState>({
+  channels: {
+    count: {
+      value: (x, y) => x + y,
+      default: () => 0,
+    },
+  },
+});
+
+console.log("LangGraph.js installed successfully!");
+```
+
+Run this file with:
+
+<CodeGroup>
+```bash npm
+npx tsx test.ts
+```
+
+```bash yarn
+yarn tsx test.ts
+```
+
+```bash pnpm
+pnpm tsx test.ts
+```
+
+</CodeGroup>
+
+If you see "LangGraph.js installed successfully!" in your console, you're ready to start building with LangGraph.js.
+
+## Next Steps
+
+Now that you have LangGraph.js installed, you can:
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="bolt" href="/langgraph-js/quick-start">
+    Build your first LangGraph.js application
+  </Card>
+  <Card
+    title="Core Concepts"
+    icon="brain"
+    href="/langgraph-js/core-concepts/state-graph"
+  >
+    Learn the fundamental concepts behind LangGraph.js
+  </Card>
+</CardGroup>{" "}

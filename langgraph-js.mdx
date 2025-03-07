@@ -1,0 +1,690 @@
+---
+title: "LangGraph.js"
+description: "Build stateful, multi-actor applications with JavaScript and TypeScript"
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/langgraph-js-light.png"
+  alt="LangGraph.js Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/langgraph-js-dark.png"
+  alt="LangGraph.js Dark"
+/>
+
+## Introduction
+
+LangGraph.js is a TypeScript/JavaScript library for building stateful, multi-actor applications with LLMs. It provides a flexible framework for creating complex AI workflows, agent systems, and stateful applications.
+
+<Note>
+  LangGraph.js is the JavaScript/TypeScript implementation of LangGraph, which
+  was originally developed for Python.
+</Note>
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="bolt" href="#quick-start">
+    Get started with LangGraph.js in minutes
+  </Card>
+  <Card title="Core Concepts" icon="brain" href="#core-concepts">
+    Learn the fundamental concepts behind LangGraph.js
+  </Card>
+  <Card title="Examples" icon="code" href="#examples">
+    Explore practical examples and use cases
+  </Card>
+  <Card title="API Reference" icon="book" href="#api-reference">
+    Detailed API documentation for advanced usage
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+### Installation
+
+Install LangGraph.js using npm, yarn, or pnpm:
+
+```bash
+# Using npm
+npm install @langchain/langgraph
+
+# Using yarn
+yarn add @langchain/langgraph
+
+# Using pnpm
+pnpm add @langchain/langgraph
+```
+
+<Note>LangGraph.js requires Node.js version 18 or higher.</Note>
+
+### Basic Example
+
+Here's a simple example of creating a graph with LangGraph.js:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+
+// Define the state
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+};
+
+// Create a new graph
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+
+// Add a node to the graph
+builder.addNode("agent", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({});
+    const response = await model.invoke(state.messages);
+    return { messages: [response] };
+  },
+});
+
+// Add edges
+builder.addEdge("start", "agent");
+builder.addEdge("agent", END);
+
+// Compile the graph
+const graph = builder.compile();
+
+// Run the graph
+const result = await graph.invoke({
+  messages: [new HumanMessage("Hello, how are you?")],
+});
+
+console.log(result.messages);
+```
+
+## Core Concepts
+
+LangGraph.js is built around several key concepts that enable the creation of stateful, multi-actor applications.
+
+### StateGraph
+
+The `StateGraph` is the core building block in LangGraph.js. It represents a directed graph where:
+
+- **Nodes** are functions or components that process state
+- **Edges** define the flow between nodes
+- **State** is passed between nodes and can be modified
+
+<Frame>
+  <img src="/images/langgraph-state-diagram.png" alt="StateGraph Diagram" />
+</Frame>
+
+### Channels
+
+Channels define how state is managed and merged throughout the graph execution. They provide:
+
+- **Value merging functions** - Define how values are combined when multiple paths converge
+- **Default values** - Initial values for state properties
+
+```typescript
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y], // Merge function
+      default: () => [], // Default value
+    },
+    context: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({}),
+    },
+  },
+});
+```
+
+### Nodes
+
+Nodes are the processing units in your graph. Each node:
+
+- Receives the current state
+- Performs some operation
+- Returns a modified state
+
+Nodes can be:
+
+- **Function nodes** - Simple functions that process state
+- **Tool nodes** - Specialized nodes for interacting with external systems
+- **Agent nodes** - Nodes that use LLMs to make decisions
+
+```typescript
+// Function node example
+builder.addNode("process_input", {
+  execute: async (state) => {
+    // Process the input and return modified state
+    return {
+      messages: [...state.messages, new AIMessage("Processed input")],
+    };
+  },
+});
+```
+
+### Edges
+
+Edges define the flow of execution between nodes. They can be:
+
+- **Static edges** - Always follow the same path
+- **Conditional edges** - Choose a path based on the state
+
+```typescript
+// Static edge
+builder.addEdge("node_a", "node_b");
+
+// Conditional edge
+builder.addConditionalEdges(
+  "router",
+  (state) => {
+    // Determine the next node based on state
+    if (state.messages[state.messages.length - 1].content.includes("search")) {
+      return "search_tool";
+    } else {
+      return "respond";
+    }
+  },
+  {
+    search_tool: "search_tool",
+    respond: "respond",
+  }
+);
+```
+
+### State
+
+State in LangGraph.js is strongly typed and can include any data needed for your application:
+
+```typescript
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+  context: {
+    query?: string;
+    results?: any[];
+    metadata?: Record<string, any>;
+  };
+  tools?: ToolInterface[];
+};
+```
+
+## Advanced Features
+
+### Branching and Merging
+
+LangGraph.js supports complex flows with branching and merging paths:
+
+```typescript
+// Create branches
+builder.addConditionalEdges("router", (state) => state.nextStep, {
+  search: "search_tool",
+  calculate: "calculator_tool",
+  respond: "final_response",
+});
+
+// Merge branches back
+builder.addEdge("search_tool", "aggregator");
+builder.addEdge("calculator_tool", "aggregator");
+builder.addEdge("aggregator", "final_response");
+```
+
+### Checkpointing
+
+Save and restore graph state for long-running processes:
+
+```typescript
+// Create a graph with checkpointing
+const graph = builder.compile({
+  checkpointer: new InMemoryCheckpointer(),
+});
+
+// Run with checkpointing
+const threadId = "unique-thread-id";
+const result = await graph.invoke(
+  { messages: [new HumanMessage("Hello")] },
+  { configurable: { thread_id: threadId } }
+);
+
+// Later, continue the same thread
+const continuedResult = await graph.invoke(
+  { messages: [new HumanMessage("Follow-up question")] },
+  { configurable: { thread_id: threadId } }
+);
+```
+
+### Human-in-the-Loop
+
+Create interactive workflows with human intervention:
+
+```typescript
+builder.addNode("human_approval", {
+  execute: async (state) => {
+    // This would typically integrate with your UI
+    const approval = await requestHumanApproval(state.proposal);
+    return {
+      approved: approval.approved,
+      feedback: approval.feedback,
+    };
+  },
+});
+
+builder.addConditionalEdges(
+  "human_approval",
+  (state) => (state.approved ? "proceed" : "revise"),
+  {
+    proceed: "execute_action",
+    revise: "generate_new_proposal",
+  }
+);
+```
+
+## Multi-Agent Systems
+
+LangGraph.js excels at building multi-agent systems where different specialized agents collaborate:
+
+```typescript
+// Create agent nodes
+builder.addNode("researcher", {
+  execute: async (state) => {
+    // Research agent implementation
+    return { research_results: [...] };
+  },
+});
+
+builder.addNode("writer", {
+  execute: async (state) => {
+    // Writer agent implementation
+    return { draft: "..." };
+  },
+});
+
+builder.addNode("editor", {
+  execute: async (state) => {
+    // Editor agent implementation
+    return { edited_content: "..." };
+  },
+});
+
+// Connect agents in workflow
+builder.addEdge("start", "researcher");
+builder.addEdge("researcher", "writer");
+builder.addEdge("writer", "editor");
+builder.addConditionalEdges(
+  "editor",
+  (state) => state.needsRevision ? "writer" : "end",
+  {
+    writer: "writer",
+    end: END,
+  }
+);
+```
+
+## Examples
+
+### Conversational Agent
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+import { ToolInterface, ToolExecutor } from "@langchain/core/tools";
+
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+  tools: ToolInterface[];
+};
+
+// Create tools
+const searchTool = {
+  name: "search",
+  description: "Search for information",
+  execute: async (input: string) => {
+    // Implementation of search
+    return `Results for: ${input}`;
+  },
+};
+
+// Create the graph
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    tools: {
+      value: (x, y) => [...x, ...y],
+      default: () => [searchTool],
+    },
+  },
+});
+
+// Add nodes
+builder.addNode("agent", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0,
+    });
+    const response = await model.invoke([
+      ...state.messages,
+      new AIMessage(
+        "I have access to these tools: " +
+          state.tools.map((t) => t.name).join(", ")
+      ),
+    ]);
+    return { messages: [response] };
+  },
+});
+
+builder.addNode("tool_executor", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage.content.includes("search:")) {
+      const query = lastMessage.content.split("search:")[1].trim();
+      const result = await searchTool.execute(query);
+      return {
+        messages: [new AIMessage(`Search result: ${result}`)],
+      };
+    }
+    return { messages: [] };
+  },
+});
+
+// Add edges
+builder.addEdge("start", "agent");
+builder.addConditionalEdges(
+  "agent",
+  (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    return lastMessage.content.includes("search:") ? "use_tool" : "end";
+  },
+  {
+    use_tool: "tool_executor",
+    end: END,
+  }
+);
+builder.addEdge("tool_executor", "agent");
+
+// Compile and run
+const graph = builder.compile();
+const result = await graph.invoke({
+  messages: [new HumanMessage("What's the weather in San Francisco?")],
+  tools: [searchTool],
+});
+```
+
+### Multi-Step Reasoning
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, AIMessage } from "@langchain/core/messages";
+
+type ReasoningState = {
+  question: string;
+  thoughts: string[];
+  answer: string | null;
+};
+
+const builder = new StateGraph<ReasoningState>({
+  channels: {
+    question: {
+      value: (x, y) => y,
+      default: () => "",
+    },
+    thoughts: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    answer: {
+      value: (x, y) => y,
+      default: () => null,
+    },
+  },
+});
+
+// Add thinking node
+builder.addNode("think", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({ modelName: "gpt-4" });
+    const response = await model.invoke([
+      new HumanMessage(`
+        Question: ${state.question}
+        Previous thoughts: ${state.thoughts.join("\n")}
+        
+        Generate a new thought that helps answer this question.
+        If you believe you have enough information to answer, respond with "ANSWER: [your answer]"
+      `),
+    ]);
+
+    const content = response.content.toString();
+    if (content.includes("ANSWER:")) {
+      const answer = content.split("ANSWER:")[1].trim();
+      return { answer };
+    } else {
+      return { thoughts: [content] };
+    }
+  },
+});
+
+// Add edges
+builder.addEdge("start", "think");
+builder.addConditionalEdges(
+  "think",
+  (state) => (state.answer ? "end" : "continue"),
+  {
+    end: END,
+    continue: "think",
+  }
+);
+
+// Compile and run
+const graph = builder.compile();
+const result = await graph.invoke({
+  question:
+    "What is the square root of 144, divided by 3, then multiplied by 7?",
+  thoughts: [],
+  answer: null,
+});
+
+console.log("Final answer:", result.answer);
+console.log("Reasoning steps:", result.thoughts);
+```
+
+## API Reference
+
+### StateGraph
+
+```typescript
+class StateGraph<TState extends Record<string, any>> {
+  constructor(options: {
+    channels: Record<
+      keyof TState,
+      {
+        value: (x: any, y: any) => any;
+        default: () => any;
+      }
+    >;
+  });
+
+  // Add a node to the graph
+  addNode(
+    name: string,
+    config: {
+      execute: (state: TState) => Promise<Partial<TState>>;
+    }
+  ): this;
+
+  // Add a static edge between nodes
+  addEdge(from: string | typeof START, to: string | typeof END): this;
+
+  // Add conditional edges
+  addConditionalEdges(
+    from: string,
+    condition: (state: TState) => string,
+    routes: Record<string, string | typeof END>
+  ): this;
+
+  // Compile the graph
+  compile(options?: {
+    checkpointer?: Checkpointer;
+    interruptible?: boolean;
+  }): CompiledGraph<TState>;
+}
+```
+
+### CompiledGraph
+
+```typescript
+class CompiledGraph<TState extends Record<string, any>> {
+  // Invoke the graph with an initial state
+  invoke(
+    state: Partial<TState>,
+    options?: {
+      configurable?: {
+        thread_id?: string;
+        interrupt_before?: string[];
+        interrupt_after?: string[];
+      };
+    }
+  ): Promise<TState>;
+
+  // Stream the execution of the graph
+  stream(
+    state: Partial<TState>,
+    options?: {
+      configurable?: {
+        thread_id?: string;
+        interrupt_before?: string[];
+        interrupt_after?: string[];
+      };
+    }
+  ): AsyncGenerator<TState>;
+}
+```
+
+### Checkpointers
+
+```typescript
+interface Checkpointer {
+  get(thread_id: string): Promise<any | null>;
+  put(thread_id: string, state: any): Promise<void>;
+  list(): Promise<string[]>;
+  delete(thread_id: string): Promise<void>;
+}
+
+// Available implementations
+class InMemoryCheckpointer implements Checkpointer {
+  /* ... */
+}
+class RedisCheckpointer implements Checkpointer {
+  /* ... */
+}
+```
+
+## Best Practices
+
+### Graph Design
+
+<AccordionGroup>
+  <Accordion title="Keep nodes focused">
+    Design each node to perform a single, well-defined task. This makes your
+    graph easier to understand, test, and maintain.
+  </Accordion>
+
+  <Accordion title="Use typed state">
+    Leverage TypeScript's type system to define clear state interfaces. This
+    provides better developer experience and catches errors early.
+  </Accordion>
+
+  <Accordion title="Plan for failure">
+    Implement error handling in your nodes and consider adding retry logic for
+    operations that might fail.
+  </Accordion>
+
+  <Accordion title="Monitor execution">
+    Use the streaming API to monitor graph execution and provide feedback to
+    users during long-running operations.
+  </Accordion>
+</AccordionGroup>
+
+### Performance Optimization
+
+<AccordionGroup>
+  <Accordion title="Parallelize when possible">
+    Use branching to run independent operations in parallel, then merge the
+    results.
+  </Accordion>
+
+  <Accordion title="Cache expensive operations">
+    Implement caching for expensive operations, especially LLM calls or external
+    API requests.
+  </Accordion>
+
+  <Accordion title="Use appropriate model sizes">
+    Choose the smallest model that can effectively complete each task to reduce
+    latency and costs.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Graph not progressing">
+    Check that your conditional edges are correctly routing to the expected
+    nodes. Add logging to see the state at each step.
+  </Accordion>
+
+  <Accordion title="State not updating correctly">
+    Verify that your channel merge functions are correctly combining state
+    values. Ensure you're returning the correct state structure from each node.
+  </Accordion>
+
+  <Accordion title="Memory issues">
+    For large state objects, consider storing large data externally and keeping
+    only references in the graph state.
+  </Accordion>
+</AccordionGroup>
+
+## Community and Support
+
+<CardGroup cols={2}>
+  <Card
+    title="GitHub"
+    icon="github"
+    href="https://github.com/langchain-ai/langgraphjs"
+  >
+    Star us on GitHub and contribute to the project
+  </Card>
+  <Card title="Discord" icon="discord" href="https://discord.gg/langchain">
+    Join our community Discord for help and discussions
+  </Card>
+  <Card
+    title="Documentation"
+    icon="book"
+    href="https://js.langchain.com/docs/langgraph/"
+  >
+    Official LangChain.js documentation
+  </Card>
+  <Card
+    title="Examples"
+    icon="code"
+    href="https://github.com/langchain-ai/langgraphjs/tree/main/examples"
+  >
+    Browse example applications and use cases
+  </Card>
+</CardGroup>
+
+## Feedback
+
+If you have any bug reports, feature requests, or other general feedback about LangGraph.js, we'd love to hear where we can improve.
+
+- Open an issue on [GitHub](https://github.com/langchain-ai/langgraphjs/issues)
+- Discuss on [Discord](https://discord.gg/langchain)
+- Email us at [support@langchain.dev](mailto:support@langchain.dev)

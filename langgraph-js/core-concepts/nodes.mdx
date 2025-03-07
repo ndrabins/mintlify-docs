@@ -1,0 +1,333 @@
+---
+title: "Nodes"
+description: "Processing units in LangGraph.js that transform state"
+---
+
+## What are Nodes?
+
+Nodes are the processing units in a LangGraph.js graph. Each node:
+
+1. Receives the current state
+2. Performs some operation or computation
+3. Returns a modified state
+
+<Frame>
+  <img src="/images/langgraph-nodes-diagram.png" alt="Nodes Diagram" />
+</Frame>
+
+Nodes are where the actual work happens in your graph. They can perform a wide range of tasks, from simple data transformations to complex operations like calling LLMs, accessing external APIs, or executing tools.
+
+## Adding Nodes to a Graph
+
+You add nodes to a StateGraph using the `addNode` method:
+
+```typescript
+builder.addNode("node_name", {
+  execute: async (state) => {
+    // Process the state
+    // ...
+
+    // Return a partial state with updates
+    return {
+      someProperty: updatedValue,
+    };
+  },
+});
+```
+
+The `addNode` method takes two arguments:
+
+- A unique name for the node
+- A configuration object with an `execute` function
+
+## The Execute Function
+
+The `execute` function is the heart of a node. It:
+
+1. Receives the current state as its argument
+2. Performs some operation
+3. Returns a partial state with updates
+
+```typescript
+execute: async (state) => {
+  // Access state properties
+  const messages = state.messages;
+  const context = state.context;
+
+  // Perform operations
+  const result = await someOperation(messages, context);
+
+  // Return partial state with updates
+  return {
+    messages: [new AIMessage(result)],
+    context: { processed: true },
+  };
+};
+```
+
+The returned object doesn't need to include all state properties - only the ones that have changed. The graph will merge this partial state with the existing state using the channel merge functions.
+
+## Node Types and Patterns
+
+While all nodes have the same basic structure, they can serve different purposes in your graph. Here are common node types and patterns:
+
+### Input Processing Nodes
+
+These nodes process and validate input:
+
+```typescript
+builder.addNode("process_input", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+
+    // Extract and process information from the input
+    const entities = extractEntities(lastMessage.content);
+    const intent = classifyIntent(lastMessage.content);
+
+    return {
+      context: {
+        entities,
+        intent,
+        processed: true,
+      },
+    };
+  },
+});
+```
+
+### LLM Nodes
+
+These nodes call language models to generate responses:
+
+```typescript
+builder.addNode("generate_response", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.7,
+    });
+
+    const response = await model.invoke(state.messages);
+
+    return {
+      messages: [response],
+    };
+  },
+});
+```
+
+### Tool Execution Nodes
+
+These nodes execute tools or call external APIs:
+
+```typescript
+builder.addNode("search_tool", {
+  execute: async (state) => {
+    const query = state.context.searchQuery;
+    const searchResults = await webSearch.search(query);
+
+    return {
+      context: {
+        searchResults,
+      },
+    };
+  },
+});
+```
+
+### Routing Nodes
+
+These nodes don't modify the state but determine the next node to execute:
+
+```typescript
+builder.addNode("router", {
+  execute: async (state) => {
+    // Determine the next step based on the state
+    // The actual routing is done by conditional edges
+    const intent = state.context.intent;
+
+    return {
+      context: {
+        nextStep: intent,
+      },
+    };
+  },
+});
+
+// Then use conditional edges to route based on the nextStep
+builder.addConditionalEdges("router", (state) => state.context.nextStep, {
+  search: "search_tool",
+  calculate: "calculator_tool",
+  respond: "generate_response",
+});
+```
+
+### Aggregation Nodes
+
+These nodes combine results from multiple paths:
+
+```typescript
+builder.addNode("aggregator", {
+  execute: async (state) => {
+    const searchResults = state.context.searchResults || [];
+    const calculationResults = state.context.calculationResults || [];
+
+    // Combine the results
+    const combinedResults = [...searchResults, ...calculationResults];
+
+    return {
+      context: {
+        combinedResults,
+      },
+    };
+  },
+});
+```
+
+## Asynchronous Operations
+
+Nodes can perform asynchronous operations using `async/await`:
+
+```typescript
+builder.addNode("async_node", {
+  execute: async (state) => {
+    // Perform asynchronous operations
+    const result1 = await someAsyncOperation();
+    const result2 = await anotherAsyncOperation();
+
+    return {
+      context: {
+        result1,
+        result2,
+      },
+    };
+  },
+});
+```
+
+## Error Handling
+
+It's important to handle errors in your nodes to prevent the graph from crashing:
+
+```typescript
+builder.addNode("error_handling_node", {
+  execute: async (state) => {
+    try {
+      const result = await riskyOperation();
+      return {
+        context: { result, success: true },
+      };
+    } catch (error) {
+      console.error("Error in node:", error);
+      return {
+        context: {
+          error: error.message,
+          success: false,
+        },
+      };
+    }
+  },
+});
+```
+
+## Stateless Nodes
+
+Sometimes you might want a node that doesn't modify the state but performs some side effect:
+
+```typescript
+builder.addNode("logging_node", {
+  execute: async (state) => {
+    // Log the current state
+    console.log("Current state:", state);
+
+    // Return an empty object to not modify the state
+    return {};
+  },
+});
+```
+
+## Reusing Node Logic
+
+For complex applications, you might want to reuse node logic across different graphs:
+
+```typescript
+// Define a reusable node function
+const createLLMNode = (modelName, temperature) => ({
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName,
+      temperature,
+    });
+
+    const response = await model.invoke(state.messages);
+
+    return {
+      messages: [response],
+    };
+  },
+});
+
+// Use it in different graphs
+builder1.addNode("llm_node", createLLMNode("gpt-4", 0.7));
+builder2.addNode("llm_node", createLLMNode("gpt-3.5-turbo", 0.5));
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep nodes focused">
+    Each node should perform a single, well-defined task. This makes your graph
+    easier to understand, test, and maintain.
+  </Accordion>
+
+  <Accordion title="Use descriptive node names">
+    Choose clear, descriptive names for your nodes that indicate their purpose.
+    This makes your graph easier to understand and debug.
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    Implement error handling in your nodes to ensure your graph can recover from
+    failures.
+  </Accordion>
+
+  <Accordion title="Minimize state updates">
+    Only return the state properties that have actually changed. This makes your
+    code more efficient and easier to understand.
+  </Accordion>
+
+  <Accordion title="Document complex nodes">
+    For complex nodes, add comments explaining what the node does and how it
+    modifies the state.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you understand Nodes, learn about:
+
+<CardGroup cols={2}>
+  <Card
+    title="Edges"
+    icon="arrow-right"
+    href="/langgraph-js/core-concepts/edges"
+  >
+    Explore different types of edges and routing
+  </Card>
+  <Card title="State" icon="database" href="/langgraph-js/core-concepts/state">
+    Learn about state management in LangGraph.js
+  </Card>
+  <Card
+    title="Channels"
+    icon="sitemap"
+    href="/langgraph-js/core-concepts/channels"
+  >
+    Understand how state is managed and merged
+  </Card>
+  <Card
+    title="Advanced Features"
+    icon="wand-magic-sparkles"
+    href="/langgraph-js/advanced/branching-merging"
+  >
+    Explore advanced features like branching and merging
+  </Card>
+</CardGroup>{" "}

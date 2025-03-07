@@ -1,0 +1,406 @@
+---
+title: "State"
+description: "Managing and transforming state in LangGraph.js applications"
+---
+
+## What is State?
+
+State in LangGraph.js represents all the data that flows through your graph. It includes:
+
+1. Input data provided to the graph
+2. Intermediate results produced by nodes
+3. Context information that guides the flow
+4. Output data returned by the graph
+
+<Frame>
+  <img src="/images/langgraph-state-diagram.png" alt="State Diagram" />
+</Frame>
+
+State is passed from node to node as the graph executes, with each node potentially modifying parts of the state. The state is strongly typed using TypeScript, providing type safety and better developer experience.
+
+## Defining State Types
+
+You define the shape of your state using TypeScript types:
+
+```typescript
+type AgentState = {
+  // Messages in the conversation
+  messages: (HumanMessage | AIMessage)[];
+
+  // Context information
+  context: {
+    query?: string;
+    results?: any[];
+    metadata?: Record<string, any>;
+  };
+
+  // Available tools
+  tools?: ToolInterface[];
+
+  // Current step in the process
+  currentStep?: string;
+};
+```
+
+This type definition is used when creating a StateGraph:
+
+```typescript
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    context: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({}),
+    },
+    tools: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    currentStep: {
+      value: (x, y) => y,
+      default: () => "start",
+    },
+  },
+});
+```
+
+## State Initialization
+
+When you invoke a graph, you provide an initial state:
+
+```typescript
+const result = await graph.invoke({
+  messages: [new HumanMessage("Hello, how are you?")],
+  context: {
+    metadata: {
+      userId: "user123",
+      sessionId: "session456",
+    },
+  },
+});
+```
+
+You don't need to provide all state properties - any missing properties will be initialized with their default values as defined in the channels.
+
+## Partial State Updates
+
+Nodes in your graph return partial state updates, not the entire state:
+
+```typescript
+builder.addNode("process_input", {
+  execute: async (state) => {
+    // Return only the properties that have changed
+    return {
+      context: {
+        query: extractQuery(state.messages),
+        processed: true,
+      },
+    };
+  },
+});
+```
+
+The graph merges these partial updates with the existing state using the channel merge functions.
+
+## State Immutability
+
+State in LangGraph.js is treated as immutable. Nodes should not modify the state directly, but instead return a new partial state with the changes:
+
+```typescript
+// ❌ Don't modify state directly
+builder.addNode("bad_node", {
+  execute: async (state) => {
+    // This modifies the state directly - don't do this!
+    state.context.processed = true;
+    return { context: state.context };
+  },
+});
+
+// ✅ Return a new partial state
+builder.addNode("good_node", {
+  execute: async (state) => {
+    // This returns a new partial state - do this!
+    return {
+      context: {
+        ...state.context,
+        processed: true,
+      },
+    };
+  },
+});
+```
+
+## Common State Patterns
+
+Here are some common patterns for structuring state in LangGraph.js applications:
+
+### Conversation State
+
+For conversational agents:
+
+```typescript
+type ConversationState = {
+  // All messages in the conversation
+  messages: (HumanMessage | AIMessage)[];
+
+  // Extracted information
+  context: {
+    entities?: string[];
+    intent?: string;
+    sentiment?: string;
+  };
+};
+```
+
+### Tool-Using Agent State
+
+For agents that use tools:
+
+```typescript
+type ToolAgentState = {
+  // Messages in the conversation
+  messages: (HumanMessage | AIMessage)[];
+
+  // Available tools
+  tools: ToolInterface[];
+
+  // Tool execution results
+  toolResults: {
+    toolName: string;
+    input: string;
+    output: string;
+  }[];
+};
+```
+
+### Multi-Agent System State
+
+For systems with multiple agents:
+
+```typescript
+type MultiAgentState = {
+  // Shared conversation
+  messages: (HumanMessage | AIMessage | SystemMessage)[];
+
+  // Agent-specific memories
+  agentMemories: Record<string, any[]>;
+
+  // Coordination information
+  coordination: {
+    currentAgent: string;
+    nextAgent: string;
+    taskStatus: Record<string, string>;
+  };
+};
+```
+
+### Workflow State
+
+For multi-step workflows:
+
+```typescript
+type WorkflowState = {
+  // Input data
+  input: any;
+
+  // Intermediate results
+  intermediateResults: Record<string, any>;
+
+  // Current step
+  currentStep: string;
+
+  // Completed steps
+  completedSteps: string[];
+
+  // Final output
+  output?: any;
+};
+```
+
+## State Access Patterns
+
+Nodes can access and update different parts of the state:
+
+### Reading State
+
+```typescript
+builder.addNode("read_state", {
+  execute: async (state) => {
+    // Access messages
+    const lastMessage = state.messages[state.messages.length - 1];
+
+    // Access context
+    const { query, results } = state.context;
+
+    // Perform operations based on state
+    // ...
+
+    return {
+      // Return updates
+    };
+  },
+});
+```
+
+### Updating State
+
+```typescript
+builder.addNode("update_state", {
+  execute: async (state) => {
+    // Return updates to different parts of the state
+    return {
+      // Add a new message
+      messages: [new AIMessage("Hello!")],
+
+      // Update context
+      context: {
+        processed: true,
+        timestamp: Date.now(),
+      },
+
+      // Update current step
+      currentStep: "response_generated",
+    };
+  },
+});
+```
+
+### Conditional Updates
+
+```typescript
+builder.addNode("conditional_update", {
+  execute: async (state) => {
+    // Only update if a condition is met
+    if (state.context.needsSearch) {
+      return {
+        context: {
+          searchResults: await performSearch(state.context.query),
+        },
+      };
+    }
+
+    // Return empty object if no updates
+    return {};
+  },
+});
+```
+
+## State Persistence with Checkpointing
+
+LangGraph.js allows you to persist state using checkpointers:
+
+```typescript
+// Create a checkpointer
+const checkpointer = new InMemoryCheckpointer();
+
+// Compile the graph with the checkpointer
+const graph = builder.compile({
+  checkpointer,
+});
+
+// Run with a specific thread ID
+const threadId = "conversation-123";
+const result = await graph.invoke(
+  { messages: [new HumanMessage("Hello")] },
+  { configurable: { thread_id: threadId } }
+);
+
+// Later, continue the same thread
+const continuedResult = await graph.invoke(
+  { messages: [new HumanMessage("Follow-up question")] },
+  { configurable: { thread_id: threadId } }
+);
+```
+
+The checkpointer saves the state after each graph execution, allowing you to resume from where you left off.
+
+## State Debugging
+
+When debugging your graph, it's helpful to log the state at different points:
+
+```typescript
+builder.addNode("debug_node", {
+  execute: async (state) => {
+    console.log("Current state:", JSON.stringify(state, null, 2));
+    return {};
+  },
+});
+```
+
+You can also use the streaming API to observe state changes as the graph executes:
+
+```typescript
+const stream = await graph.stream({
+  messages: [new HumanMessage("Hello")],
+});
+
+for await (const state of stream) {
+  console.log("State update:", state);
+}
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep state focused">
+    Include only the data that's necessary for your graph. Avoid storing large
+    or unnecessary data in the state.
+  </Accordion>
+
+  <Accordion title="Use clear naming">
+    Choose clear, descriptive names for your state properties. This makes your
+    code easier to understand and maintain.
+  </Accordion>
+
+  <Accordion title="Structure hierarchically">
+    Group related data under nested objects. This keeps your state organized and
+    easier to manage.
+  </Accordion>
+
+  <Accordion title="Treat state as immutable">
+    Never modify state directly. Always return new objects with your changes.
+  </Accordion>
+
+  <Accordion title="Use TypeScript types">
+    Define comprehensive types for your state. This provides better type safety
+    and developer experience.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you understand State, explore these advanced topics:
+
+<CardGroup cols={2}>
+  <Card
+    title="Checkpointing"
+    icon="save"
+    href="/langgraph-js/advanced/checkpointing"
+  >
+    Learn how to persist and restore state
+  </Card>
+  <Card
+    title="Branching and Merging"
+    icon="code-branch"
+    href="/langgraph-js/advanced/branching-merging"
+  >
+    Explore advanced branching and merging patterns
+  </Card>
+  <Card
+    title="Human-in-the-Loop"
+    icon="user"
+    href="/langgraph-js/advanced/human-in-the-loop"
+  >
+    Add human feedback and intervention to your workflows
+  </Card>
+  <Card
+    title="Multi-Agent Systems"
+    icon="users"
+    href="/langgraph-js/advanced/multi-agent-systems"
+  >
+    Build systems with multiple specialized agents
+  </Card>
+</CardGroup>{" "}

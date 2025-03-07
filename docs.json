@@ -15,11 +15,7 @@
         "groups": [
           {
             "group": "Get Started",
-            "pages": [
-              "introduction",
-              "quickstart",
-              "development"
-            ]
+            "pages": ["introduction", "quickstart", "development"]
           },
           {
             "group": "Essentials",
@@ -31,6 +27,58 @@
               "essentials/navigation",
               "essentials/reusable-snippets"
             ]
+          },
+          {
+            "group": "LangGraph.js",
+            "pages": ["langgraph-js"]
+          }
+        ]
+      },
+      {
+        "tab": "LangGraph.js",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "langgraph-js/introduction",
+              "langgraph-js/installation",
+              "langgraph-js/quick-start"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "langgraph-js/examples/generative-ui-agent",
+              "langgraph-js/examples/chatbot-support-agent",
+              "langgraph-js/examples/daily-email-reminder"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "langgraph-js/core-concepts/state-graph",
+              "langgraph-js/core-concepts/channels",
+              "langgraph-js/core-concepts/nodes",
+              "langgraph-js/core-concepts/edges",
+              "langgraph-js/core-concepts/state"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "langgraph-js/advanced/branching-merging",
+              "langgraph-js/advanced/checkpointing",
+              "langgraph-js/advanced/human-in-the-loop",
+              "langgraph-js/advanced/multi-agent-systems"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "langgraph-js/best-practices/graph-design",
+              "langgraph-js/best-practices/performance",
+              "langgraph-js/best-practices/troubleshooting"
+            ]
           }
         ]
       },
@@ -39,8 +87,15 @@
         "groups": [
           {
             "group": "API Documentation",
+            "pages": ["api-reference/introduction"]
+          },
+          {
+            "group": "LangGraph.js API",
             "pages": [
-              "api-reference/introduction"
+              "langgraph-js/api/state-graph",
+              "langgraph-js/api/compiled-graph",
+              "langgraph-js/api/checkpointers",
+              "langgraph-js/api/utilities"
             ]
           },
           {
@@ -64,13 +119,13 @@
         },
         {
           "anchor": "Community",
-          "href": "https://mintlify.com/community",
-          "icon": "slack"
+          "href": "https://discord.gg/langchain",
+          "icon": "discord"
         },
         {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
+          "anchor": "GitHub",
+          "href": "https://github.com/langchain-ai/langgraphjs",
+          "icon": "github"
         }
       ]
     }

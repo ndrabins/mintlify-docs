@@ -1,0 +1,582 @@
+---
+title: "Generative UI Agent"
+description: "Build an agent that can generate and interact with UI components"
+---
+
+# Generative UI Agent
+
+This example demonstrates how to build an agent that can generate UI components based on user requests and interact with them. The agent can understand user requirements, generate appropriate UI components, and handle interactions with those components.
+
+## Use Case
+
+A generative UI agent can be useful for:
+
+- Rapid prototyping of user interfaces
+- Creating dynamic UI components based on user needs
+- Building assistive tools for designers and developers
+- Creating accessible interfaces for users with specific needs
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+1. Installed LangGraph.js (see [Installation](/langgraph-js/installation))
+2. Set up an OpenAI API key with access to GPT-4 Vision
+3. Basic knowledge of React or another UI framework
+
+## Implementation
+
+### Step 1: Define the State
+
+First, let's define the state for our UI agent:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import {
+  HumanMessage,
+  AIMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
+
+// Define UI component types
+type UIComponent = {
+  type: string;
+  props: Record<string, any>;
+  children?: UIComponent[] | string;
+};
+
+// Define the state type
+type UIAgentState = {
+  messages: (HumanMessage | AIMessage | SystemMessage)[];
+  userRequest: string;
+  generatedComponents: UIComponent[];
+  currentView: string;
+  interactionHistory: {
+    componentId: string;
+    action: string;
+    timestamp: number;
+  }[];
+  feedback: string[];
+};
+```
+
+### Step 2: Create the Graph
+
+Now, let's create the graph with appropriate channels:
+
+```typescript
+const builder = new StateGraph<UIAgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [
+        new SystemMessage(
+          "You are a UI generation assistant. You can create UI components based on user requests and handle interactions with them."
+        ),
+      ],
+    },
+    userRequest: {
+      value: (x, y) => y,
+      default: () => "",
+    },
+    generatedComponents: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    currentView: {
+      value: (x, y) => y,
+      default: () => "main",
+    },
+    interactionHistory: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    feedback: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+```
+
+### Step 3: Add Nodes for UI Generation and Interaction
+
+Let's add nodes to handle different aspects of UI generation and interaction:
+
+````typescript
+// Node to understand user request
+builder.addNode("understand_request", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return {};
+    }
+
+    const userRequest = lastMessage.content.toString();
+
+    return {
+      userRequest,
+      messages: [
+        new AIMessage(`I'll help you create UI components for: ${userRequest}`),
+      ],
+    };
+  },
+});
+
+// Node to generate UI components
+builder.addNode("generate_ui", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.7,
+    });
+
+    const response = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        Generate UI components for the following request: ${state.userRequest}
+        
+        Return the components as a valid JSON array following this format:
+        [
+          {
+            "type": "Button|Input|Card|List|etc",
+            "props": { key-value pairs for properties },
+            "children": [ nested components or string content ]
+          }
+        ]
+        
+        Make sure the JSON is valid and properly formatted.
+      `),
+    ]);
+
+    // Parse the JSON from the response
+    const content = response.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let components: UIComponent[] = [];
+    try {
+      components = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse JSON:", error);
+      components = [];
+    }
+
+    return {
+      generatedComponents: components,
+      messages: [
+        new AIMessage(`I've generated the following UI components based on your request:
+${JSON.stringify(components, null, 2)}
+
+Would you like to make any changes or interact with these components?`),
+      ],
+    };
+  },
+});
+
+// Node to handle user interaction with components
+builder.addNode("handle_interaction", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return {};
+    }
+
+    const userInteraction = lastMessage.content.toString();
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Analyze the interaction to determine what component is being interacted with
+    const interactionAnalysis = await model.invoke([
+      new SystemMessage(`
+        Analyze the following user interaction with UI components:
+        ${userInteraction}
+        
+        Identify:
+        1. Which component is being interacted with
+        2. What action is being performed
+        3. Any parameters or values involved
+        
+        Return your analysis as JSON.
+      `),
+    ]);
+
+    // Extract the interaction details
+    const content = interactionAnalysis.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let interaction = { componentId: "", action: "" };
+    try {
+      interaction = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse interaction JSON:", error);
+    }
+
+    // Record the interaction
+    const interactionRecord = {
+      ...interaction,
+      timestamp: Date.now(),
+    };
+
+    // Generate a response based on the interaction
+    const response = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        The user has interacted with the UI components.
+        Interaction details: ${JSON.stringify(interactionRecord)}
+        Current components: ${JSON.stringify(state.generatedComponents)}
+        
+        Respond to the interaction appropriately.
+      `),
+    ]);
+
+    return {
+      interactionHistory: [interactionRecord],
+      messages: [response],
+    };
+  },
+});
+
+// Node to update UI based on interactions
+builder.addNode("update_ui", {
+  execute: async (state) => {
+    if (state.interactionHistory.length === 0) {
+      return {};
+    }
+
+    const latestInteraction =
+      state.interactionHistory[state.interactionHistory.length - 1];
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Generate updated components based on the interaction
+    const response = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        Update the UI components based on the latest interaction:
+        ${JSON.stringify(latestInteraction)}
+        
+        Current components: ${JSON.stringify(state.generatedComponents)}
+        
+        Return the updated components as a valid JSON array.
+      `),
+    ]);
+
+    // Parse the JSON from the response
+    const content = response.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let updatedComponents: UIComponent[] = [];
+    try {
+      updatedComponents = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse updated components JSON:", error);
+      updatedComponents = state.generatedComponents;
+    }
+
+    return {
+      generatedComponents: updatedComponents,
+      messages: [
+        new AIMessage(`I've updated the UI components based on your interaction:
+${JSON.stringify(updatedComponents, null, 2)}
+
+What would you like to do next?`),
+      ],
+    };
+  },
+});
+
+// Node to collect user feedback
+builder.addNode("collect_feedback", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return {};
+    }
+
+    const userFeedback = lastMessage.content.toString();
+
+    // Check if this is feedback
+    if (
+      userFeedback.toLowerCase().includes("feedback") ||
+      userFeedback.toLowerCase().includes("suggest") ||
+      userFeedback.toLowerCase().includes("improve")
+    ) {
+      return {
+        feedback: [userFeedback],
+        messages: [
+          new AIMessage(
+            "Thank you for your feedback! I'll use it to improve the UI components."
+          ),
+        ],
+      };
+    }
+
+    return {};
+  },
+});
+
+// Router node to determine next action
+builder.addNode("router", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return { currentView: "waiting_for_user" };
+    }
+
+    const userMessage = lastMessage.content.toString().toLowerCase();
+
+    if (
+      userMessage.includes("generate") ||
+      userMessage.includes("create") ||
+      state.generatedComponents.length === 0
+    ) {
+      return { currentView: "generate" };
+    } else if (
+      userMessage.includes("interact") ||
+      userMessage.includes("click") ||
+      userMessage.includes("input")
+    ) {
+      return { currentView: "interact" };
+    } else if (
+      userMessage.includes("feedback") ||
+      userMessage.includes("suggest")
+    ) {
+      return { currentView: "feedback" };
+    } else if (
+      userMessage.includes("done") ||
+      userMessage.includes("finish") ||
+      userMessage.includes("exit")
+    ) {
+      return { currentView: "end" };
+    } else {
+      return { currentView: "generate" };
+    }
+  },
+});
+````
+
+### Step 4: Add Edges to Connect the Nodes
+
+Now, let's connect the nodes with appropriate edges:
+
+```typescript
+// Add edges
+builder.addEdge("start", "understand_request");
+builder.addEdge("understand_request", "router");
+
+// Add conditional edges from the router
+builder.addConditionalEdges("router", (state) => state.currentView, {
+  generate: "generate_ui",
+  interact: "handle_interaction",
+  feedback: "collect_feedback",
+  end: END,
+  waiting_for_user: "router",
+});
+
+// Connect other nodes back to the router
+builder.addEdge("generate_ui", "router");
+builder.addEdge("handle_interaction", "update_ui");
+builder.addEdge("update_ui", "router");
+builder.addEdge("collect_feedback", "router");
+```
+
+### Step 5: Compile and Run the Graph
+
+Finally, let's compile and run the graph:
+
+```typescript
+// Compile the graph
+const graph = builder.compile();
+
+// Function to run the agent
+async function runUIAgent(userRequest: string) {
+  // Initial state
+  let state = await graph.invoke({
+    messages: [new HumanMessage(userRequest)],
+  });
+
+  console.log("Initial UI components generated:");
+  console.log(JSON.stringify(state.generatedComponents, null, 2));
+
+  // Simulate user interaction
+  state = await graph.invoke({
+    messages: [
+      ...state.messages,
+      new HumanMessage("I want to click the Submit button"),
+    ],
+  });
+
+  console.log("UI after interaction:");
+  console.log(JSON.stringify(state.generatedComponents, null, 2));
+
+  // Provide feedback
+  state = await graph.invoke({
+    messages: [
+      ...state.messages,
+      new HumanMessage("I'd like the button to be blue instead of green"),
+    ],
+  });
+
+  console.log("Final UI components:");
+  console.log(JSON.stringify(state.generatedComponents, null, 2));
+
+  return state;
+}
+
+// Run the agent
+runUIAgent(
+  "Create a contact form with name, email, and message fields, and a submit button"
+).catch(console.error);
+```
+
+## Integration with React
+
+To integrate this agent with a React application, you can create a component that renders the generated UI components:
+
+```tsx
+import React, { useState, useEffect } from "react";
+
+// Component to render the generated UI
+const GenerativeUI: React.FC<{ components: UIComponent[] }> = ({
+  components,
+}) => {
+  // Function to recursively render components
+  const renderComponent = (component: UIComponent, index: number) => {
+    const { type, props, children } = component;
+
+    // Map component types to React components
+    const componentMap: Record<string, any> = {
+      Button: (props: any) => <button {...props}>{props.children}</button>,
+      Input: (props: any) => <input {...props} />,
+      Card: (props: any) => (
+        <div className="card" {...props}>
+          {props.children}
+        </div>
+      ),
+      List: (props: any) => <ul {...props}>{props.children}</ul>,
+      ListItem: (props: any) => <li {...props}>{props.children}</li>,
+      Text: (props: any) => <p {...props}>{props.children}</p>,
+      Heading: (props: any) => <h2 {...props}>{props.children}</h2>,
+      Form: (props: any) => <form {...props}>{props.children}</form>,
+      // Add more component types as needed
+    };
+
+    const Component =
+      componentMap[type] ||
+      ((props: any) => <div {...props}>{props.children}</div>);
+
+    // Render children recursively if they exist
+    const renderedChildren = Array.isArray(children)
+      ? children.map((child, i) =>
+          typeof child === "string" ? child : renderComponent(child, i)
+        )
+      : children;
+
+    return (
+      <Component key={index} {...props}>
+        {renderedChildren}
+      </Component>
+    );
+  };
+
+  return (
+    <div className="generative-ui-container">
+      {components.map((component, index) => renderComponent(component, index))}
+    </div>
+  );
+};
+
+// Main application component
+const App: React.FC = () => {
+  const [userInput, setUserInput] = useState("");
+  const [components, setComponents] = useState<UIComponent[]>([]);
+  const [messages, setMessages] = useState<(HumanMessage | AIMessage)[]>([]);
+
+  // Function to send user input to the agent
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Add user message to the conversation
+    const updatedMessages = [...messages, new HumanMessage(userInput)];
+    setMessages(updatedMessages);
+
+    // Call the agent (this would be your LangGraph.js agent)
+    const result = await callUIAgent(updatedMessages);
+
+    // Update state with the agent's response
+    setComponents(result.generatedComponents);
+    setMessages(result.messages);
+    setUserInput("");
+  };
+
+  return (
+    <div className="app">
+      <div className="preview-area">
+        <h2>Generated UI</h2>
+        <GenerativeUI components={components} />
+      </div>
+
+      <div className="chat-area">
+        <div className="messages">
+          {messages.map((message, index) => (
+            <div key={index} className={`message ${message._getType()}`}>
+              {message.content.toString()}
+            </div>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <input
+            type="text"
+            value={userInput}
+            onChange={(e) => setUserInput(e.target.value)}
+            placeholder="Describe UI components or interact with them..."
+          />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default App;
+```
+
+## Advanced Features
+
+You can extend this example with additional features:
+
+- **Component Library Integration**: Connect with existing UI libraries like Material UI or Chakra UI
+- **Code Generation**: Generate actual React/Vue/Angular code for the UI components
+- **User Preferences**: Store and apply user preferences for UI styling
+- **Accessibility Checks**: Analyze and improve the accessibility of generated components
+- **Interactive Preview**: Allow users to directly interact with the generated UI in a preview area
+
+## Conclusion
+
+This example demonstrates how to build a generative UI agent using LangGraph.js. The agent can understand user requirements, generate appropriate UI components, and handle interactions with those components. By integrating this agent with a frontend framework like React, you can create a powerful tool for rapid UI prototyping and generation.
+
+<CardGroup cols={2}>
+  <Card
+    title="Chatbot Support Agent"
+    icon="headset"
+    href="/langgraph-js/examples/chatbot-support-agent"
+  >
+    Build a customer support chatbot with LangGraph.js
+  </Card>
+  <Card
+    title="Daily Email Reminder Agent"
+    icon="envelope"
+    href="/langgraph-js/examples/daily-email-reminder"
+  >
+    Create an agent that sends daily email reminders
+  </Card>
+</CardGroup>{" "}

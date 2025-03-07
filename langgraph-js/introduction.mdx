@@ -1,0 +1,82 @@
+---
+title: "Introduction to LangGraph.js"
+description: "Build stateful, multi-actor applications with JavaScript and TypeScript"
+---
+
+<img
+  className="block dark:hidden"
+  src="/images/langgraph-js-light.png"
+  alt="LangGraph.js Light"
+/>
+<img
+  className="hidden dark:block"
+  src="/images/langgraph-js-dark.png"
+  alt="LangGraph.js Dark"
+/>
+
+## What is LangGraph.js?
+
+LangGraph.js is a TypeScript/JavaScript library for building stateful, multi-actor applications with LLMs. It provides a flexible framework for creating complex AI workflows, agent systems, and stateful applications.
+
+<Note>
+  LangGraph.js is the JavaScript/TypeScript implementation of LangGraph, which
+  was originally developed for Python.
+</Note>
+
+### Key Features
+
+- **Stateful Execution**: Maintain and manage state across multiple steps in your AI workflows
+- **Graph-based Architecture**: Define complex flows with nodes and edges for flexible application design
+- **Checkpointing**: Save and resume execution state for long-running processes
+- **Human-in-the-Loop**: Easily integrate human feedback and intervention in your AI systems
+- **Multi-Agent Support**: Build systems with multiple specialized agents working together
+- **TypeScript Integration**: Fully typed API for better developer experience and code safety
+
+## Why use LangGraph?
+
+LangGraph provides fine-grained control over both the flow and state of your agent applications. It implements a central persistence layer, enabling features that are common to most agent architectures:
+
+- **Memory**: LangGraph persists arbitrary aspects of your application's state, supporting memory of conversations and other updates within and across user interactions
+- **Human-in-the-loop**: Because state is checkpointed, execution can be interrupted and resumed, allowing for decisions, validation, and corrections at key stages via human input
+
+Standardizing these components allows individuals and teams to focus on the behavior of their agent, instead of its supporting infrastructure.
+
+## LangGraph Platform
+
+LangGraph Platform is infrastructure for deploying LangGraph agents. It is a commercial solution for deploying agentic applications to production, built on the open-source LangGraph framework. The LangGraph Platform consists of several components that work together to support the development, deployment, debugging, and monitoring of LangGraph applications:
+
+- **LangGraph Server (APIs)**: Backend services for running your agents
+- **LangGraph SDKs**: Client libraries for interacting with the server
+- **LangGraph CLI**: Command line tools for building and deploying
+- **LangGraph Studio**: Visual UI for debugging and monitoring
+
+The platform addresses common challenges in production deployments:
+
+- **Streaming support**: Multiple streaming modes optimized for various application needs
+- **Background runs**: Run agents asynchronously in the background
+- **Support for long-running agents**: Infrastructure for handling long-running processes
+- **Double texting**: Handle cases where you get two messages from the user before the agent can respond
+- **Handle burstiness**: Task queue for ensuring requests are handled consistently without loss
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/langgraph-js/installation">
+    Get LangGraph.js installed in your project
+  </Card>
+  <Card title="Quick Start" icon="bolt" href="/langgraph-js/quick-start">
+    Build your first LangGraph.js application
+  </Card>
+  <Card
+    title="Core Concepts"
+    icon="brain"
+    href="/langgraph-js/core-concepts/state-graph"
+  >
+    Learn the fundamental concepts behind LangGraph.js
+  </Card>
+  <Card
+    title="Examples"
+    icon="code"
+    href="/langgraph-js/examples/conversational-agent"
+  >
+    Explore practical examples and use cases
+  </Card>
+</CardGroup>{" "}

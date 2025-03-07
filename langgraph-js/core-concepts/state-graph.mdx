@@ -1,0 +1,243 @@
+---
+title: "StateGraph"
+description: "The core building block of LangGraph.js applications"
+---
+
+## What is a StateGraph?
+
+The `StateGraph` is the fundamental building block in LangGraph.js. It represents a directed graph where:
+
+- **Nodes** are functions or components that process state
+- **Edges** define the flow between nodes
+- **State** is passed between nodes and can be modified
+
+<Frame>
+  <img src="/images/langgraph-state-diagram.png" alt="StateGraph Diagram" />
+</Frame>
+
+A StateGraph provides a structured way to define complex workflows with multiple steps, branching logic, and state management.
+
+## Creating a StateGraph
+
+To create a StateGraph, you first need to define the shape of your state using TypeScript types:
+
+```typescript
+type AgentState = {
+  messages: (HumanMessage | AIMessage)[];
+  context: Record<string, any>;
+  tools: ToolInterface[];
+};
+```
+
+Then, you can create a new StateGraph instance:
+
+```typescript
+import { StateGraph } from "@langchain/langgraph";
+
+const builder = new StateGraph<AgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    context: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({}),
+    },
+    tools: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+```
+
+The `channels` parameter defines how each part of the state is managed and merged throughout the graph execution.
+
+## Adding Nodes
+
+Nodes are the processing units in your graph. Each node receives the current state, performs some operation, and returns a modified state:
+
+```typescript
+builder.addNode("process_input", {
+  execute: async (state) => {
+    // Process the input and return modified state
+    return {
+      context: {
+        ...state.context,
+        processed: true,
+        timestamp: Date.now(),
+      },
+    };
+  },
+});
+
+builder.addNode("generate_response", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({});
+    const response = await model.invoke(state.messages);
+    return {
+      messages: [response],
+    };
+  },
+});
+```
+
+## Adding Edges
+
+Edges define the flow of execution between nodes:
+
+```typescript
+// Static edges
+builder.addEdge("start", "process_input");
+builder.addEdge("process_input", "generate_response");
+builder.addEdge("generate_response", "end");
+```
+
+You can also add conditional edges that choose a path based on the state:
+
+```typescript
+builder.addConditionalEdges(
+  "router",
+  (state) => {
+    if (state.context.needsSearch) {
+      return "search";
+    } else if (state.context.needsCalculation) {
+      return "calculate";
+    } else {
+      return "respond";
+    }
+  },
+  {
+    search: "search_tool",
+    calculate: "calculator_tool",
+    respond: "generate_response",
+  }
+);
+```
+
+## Special Nodes: START and END
+
+LangGraph.js provides two special node identifiers:
+
+- `"start"` - The entry point of the graph
+- `END` - The exit point of the graph
+
+```typescript
+import { END } from "@langchain/langgraph";
+
+// Connect the first node to the start
+builder.addEdge("start", "first_node");
+
+// Connect the last node to the end
+builder.addEdge("last_node", END);
+```
+
+## Compiling and Running the Graph
+
+Once you've defined your graph, you need to compile it before you can run it:
+
+```typescript
+const graph = builder.compile();
+```
+
+You can then invoke the graph with an initial state:
+
+```typescript
+const result = await graph.invoke({
+  messages: [new HumanMessage("Hello, how are you?")],
+  context: {},
+  tools: [],
+});
+```
+
+## Streaming Execution
+
+You can also stream the execution of the graph to get updates as each node completes:
+
+```typescript
+const stream = await graph.stream({
+  messages: [new HumanMessage("Hello, how are you?")],
+});
+
+for await (const state of stream) {
+  console.log("Current state:", state);
+}
+```
+
+## Checkpointing
+
+StateGraphs support checkpointing, which allows you to save and restore the state of the graph:
+
+```typescript
+const graph = builder.compile({
+  checkpointer: new InMemoryCheckpointer(),
+});
+
+// Run with a specific thread ID
+const result = await graph.invoke(
+  { messages: [new HumanMessage("Hello")] },
+  { configurable: { thread_id: "conversation-123" } }
+);
+
+// Later, continue the same thread
+const continuedResult = await graph.invoke(
+  { messages: [new HumanMessage("Follow-up question")] },
+  { configurable: { thread_id: "conversation-123" } }
+);
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Keep nodes focused">
+    Design each node to perform a single, well-defined task. This makes your
+    graph easier to understand, test, and maintain.
+  </Accordion>
+
+  <Accordion title="Use descriptive node names">
+    Choose clear, descriptive names for your nodes that indicate their purpose.
+    This makes your graph easier to understand and debug.
+  </Accordion>
+
+  <Accordion title="Plan your state structure">
+    Carefully design your state structure to include all the information needed
+    by your nodes, while avoiding unnecessary complexity.
+  </Accordion>
+
+  <Accordion title="Handle errors gracefully">
+    Implement error handling in your nodes to ensure your graph can recover from
+    failures.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you understand StateGraphs, learn about:
+
+<CardGroup cols={2}>
+  <Card
+    title="Channels"
+    icon="sitemap"
+    href="/langgraph-js/core-concepts/channels"
+  >
+    Learn how state is managed and merged in LangGraph.js
+  </Card>
+  <Card
+    title="Nodes"
+    icon="circle-nodes"
+    href="/langgraph-js/core-concepts/nodes"
+  >
+    Dive deeper into node types and patterns
+  </Card>
+  <Card
+    title="Edges"
+    icon="arrow-right"
+    href="/langgraph-js/core-concepts/edges"
+  >
+    Explore different types of edges and routing
+  </Card>
+  <Card title="State" icon="database" href="/langgraph-js/core-concepts/state">
+    Learn about state management in LangGraph.js
+  </Card>
+</CardGroup>{" "}
