@@ -1,0 +1,808 @@
+---
+title: "Chatbot Support Agent"
+description: "Build an intelligent customer support chatbot with LangGraph.js"
+---
+
+# Chatbot Support Agent
+
+This example demonstrates how to build an intelligent customer support chatbot using LangGraph.js. The chatbot can understand customer queries, access knowledge bases, handle common support tasks, and escalate to human agents when necessary.
+
+## Use Case
+
+A support chatbot can be valuable for:
+
+- Providing 24/7 customer support
+- Handling common questions and issues automatically
+- Reducing wait times for customers
+- Freeing up human agents to handle complex cases
+- Collecting customer information before escalation
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+1. Installed LangGraph.js (see [Installation](/langgraph-js/installation))
+2. Set up an OpenAI API key
+3. A knowledge base or documentation for your product/service
+
+## Implementation
+
+### Step 1: Define the State
+
+First, let's define the state for our support chatbot:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import {
+  HumanMessage,
+  AIMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
+import { Document } from "@langchain/core/documents";
+
+// Define the state type
+type SupportAgentState = {
+  messages: (HumanMessage | AIMessage | SystemMessage)[];
+  customerInfo: {
+    name?: string;
+    email?: string;
+    accountId?: string;
+    issue?: string;
+    priority?: "low" | "medium" | "high";
+  };
+  retrievedDocs: Document[];
+  needsHumanEscalation: boolean;
+  ticketCreated: boolean;
+  ticketId?: string;
+  currentStep: string;
+  actionHistory: {
+    action: string;
+    timestamp: number;
+    result?: string;
+  }[];
+};
+```
+
+### Step 2: Create the Graph
+
+Now, let's create the graph with appropriate channels:
+
+```typescript
+const builder = new StateGraph<SupportAgentState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [
+        new SystemMessage(
+          "You are a helpful customer support agent for our product. Your goal is to help customers resolve their issues efficiently and professionally. You have access to our knowledge base and can create support tickets when necessary."
+        ),
+      ],
+    },
+    customerInfo: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({}),
+    },
+    retrievedDocs: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    needsHumanEscalation: {
+      value: (x, y) => x || y,
+      default: () => false,
+    },
+    ticketCreated: {
+      value: (x, y) => x || y,
+      default: () => false,
+    },
+    ticketId: {
+      value: (x, y) => y || x,
+      default: () => undefined,
+    },
+    currentStep: {
+      value: (x, y) => y,
+      default: () => "greeting",
+    },
+    actionHistory: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+  },
+});
+```
+
+### Step 3: Add Nodes for Different Support Functions
+
+Let's add nodes to handle different aspects of customer support:
+
+````typescript
+// Node to greet the customer and collect initial information
+builder.addNode("greeting", {
+  execute: async (state) => {
+    // Only process if this is a new conversation or we're explicitly in the greeting step
+    if (state.messages.length <= 1 || state.currentStep === "greeting") {
+      return {
+        messages: [
+          new AIMessage(
+            "Hello! I'm your support assistant. How can I help you today? " +
+              "If you could briefly describe your issue, I'll do my best to assist you."
+          ),
+        ],
+        currentStep: "collect_info",
+      };
+    }
+    return {};
+  },
+});
+
+// Node to collect customer information
+builder.addNode("collect_info", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return {};
+    }
+
+    const userMessage = lastMessage.content.toString();
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Extract customer information from the message
+    const infoExtractionResponse = await model.invoke([
+      new SystemMessage(`
+        Extract the following information from the customer message if present:
+        - Customer name
+        - Email address
+        - Account ID
+        - Main issue/problem
+        - Priority level (infer from urgency of the issue)
+        
+        Return the information as JSON.
+      `),
+      new HumanMessage(userMessage),
+    ]);
+
+    // Parse the extracted information
+    const content = infoExtractionResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let extractedInfo = {};
+    try {
+      extractedInfo = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse extracted info:", error);
+    }
+
+    // Determine priority if not explicitly stated
+    if (!extractedInfo.priority && extractedInfo.issue) {
+      const issue = extractedInfo.issue.toLowerCase();
+      if (
+        issue.includes("urgent") ||
+        issue.includes("emergency") ||
+        issue.includes("critical")
+      ) {
+        extractedInfo.priority = "high";
+      } else if (issue.includes("important") || issue.includes("soon")) {
+        extractedInfo.priority = "medium";
+      } else {
+        extractedInfo.priority = "low";
+      }
+    }
+
+    // Record the action
+    const action = {
+      action: "collect_customer_info",
+      timestamp: Date.now(),
+      result: JSON.stringify(extractedInfo),
+    };
+
+    return {
+      customerInfo: extractedInfo,
+      actionHistory: [action],
+      currentStep: "retrieve_knowledge",
+    };
+  },
+});
+
+// Node to retrieve relevant knowledge base articles
+builder.addNode("retrieve_knowledge", {
+  execute: async (state) => {
+    // Mock knowledge base retrieval
+    // In a real implementation, you would use a vector database or similar
+    const mockKnowledgeBase = [
+      new Document({
+        pageContent:
+          "How to reset your password: 1. Go to login page. 2. Click 'Forgot Password'. 3. Follow the email instructions.",
+        metadata: { title: "Password Reset Guide", category: "account" },
+      }),
+      new Document({
+        pageContent:
+          "Billing cycles run from the 1st to the last day of each month. Payments are processed on the 5th.",
+        metadata: { title: "Billing Information", category: "billing" },
+      }),
+      new Document({
+        pageContent:
+          "To upgrade your account, go to Settings > Plan > Upgrade and select your new plan.",
+        metadata: { title: "Account Upgrade Guide", category: "account" },
+      }),
+      new Document({
+        pageContent:
+          "Common login issues: 1. Caps lock is on. 2. Using old password. 3. Account is locked after too many attempts.",
+        metadata: { title: "Login Troubleshooting", category: "account" },
+      }),
+      new Document({
+        pageContent:
+          "If you're experiencing slow performance, try clearing your cache and cookies, or use our desktop app.",
+        metadata: { title: "Performance Issues", category: "technical" },
+      }),
+    ];
+
+    // Get the customer's issue
+    const issue = state.customerInfo.issue || "";
+
+    // In a real implementation, you would use a retriever here
+    // For this example, we'll do a simple keyword match
+    const relevantDocs = mockKnowledgeBase.filter((doc) => {
+      const content = doc.pageContent.toLowerCase();
+      const issueWords = issue.toLowerCase().split(/\s+/);
+      return issueWords.some(
+        (word) => word.length > 3 && content.includes(word)
+      );
+    });
+
+    // Record the action
+    const action = {
+      action: "retrieve_knowledge",
+      timestamp: Date.now(),
+      result: `Found ${relevantDocs.length} relevant documents`,
+    };
+
+    return {
+      retrievedDocs: relevantDocs,
+      actionHistory: [action],
+      currentStep: "analyze_issue",
+    };
+  },
+});
+
+// Node to analyze the issue and determine next steps
+builder.addNode("analyze_issue", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Prepare knowledge base information
+    const knowledgeInfo = state.retrievedDocs
+      .map(
+        (doc) =>
+          `Title: ${doc.metadata.title}\nCategory: ${doc.metadata.category}\nContent: ${doc.pageContent}`
+      )
+      .join("\n\n");
+
+    // Analyze the issue
+    const analysisResponse = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        Based on the customer's issue and the following knowledge base articles, determine:
+        1. Can this issue be resolved using our knowledge base?
+        2. Does this issue require human escalation?
+        3. Should we create a support ticket?
+        4. What is the next best action?
+        
+        Knowledge Base Articles:
+        ${knowledgeInfo || "No relevant articles found."}
+        
+        Customer Information:
+        ${JSON.stringify(state.customerInfo, null, 2)}
+        
+        Return your analysis as JSON with the following fields:
+        - canResolveWithKnowledge: boolean
+        - needsHumanEscalation: boolean
+        - shouldCreateTicket: boolean
+        - nextAction: string (one of: "provide_solution", "request_more_info", "escalate", "create_ticket")
+        - reasoning: string
+      `),
+    ]);
+
+    // Parse the analysis
+    const content = analysisResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let analysis = {
+      canResolveWithKnowledge: false,
+      needsHumanEscalation: false,
+      shouldCreateTicket: false,
+      nextAction: "provide_solution",
+      reasoning: "",
+    };
+
+    try {
+      analysis = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse analysis:", error);
+    }
+
+    // Record the action
+    const action = {
+      action: "analyze_issue",
+      timestamp: Date.now(),
+      result: analysis.nextAction,
+    };
+
+    return {
+      needsHumanEscalation: analysis.needsHumanEscalation,
+      actionHistory: [action],
+      currentStep: analysis.nextAction,
+    };
+  },
+});
+
+// Node to provide a solution based on knowledge base
+builder.addNode("provide_solution", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.7,
+    });
+
+    // Prepare knowledge base information
+    const knowledgeInfo = state.retrievedDocs
+      .map(
+        (doc) =>
+          `Title: ${doc.metadata.title}\nCategory: ${doc.metadata.category}\nContent: ${doc.pageContent}`
+      )
+      .join("\n\n");
+
+    // Generate a solution
+    const solutionResponse = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        Based on the customer's issue and our knowledge base, provide a helpful solution.
+        Be friendly, clear, and concise.
+        
+        Knowledge Base Articles:
+        ${knowledgeInfo || "No relevant articles found."}
+        
+        Customer Information:
+        ${JSON.stringify(state.customerInfo, null, 2)}
+      `),
+    ]);
+
+    // Record the action
+    const action = {
+      action: "provide_solution",
+      timestamp: Date.now(),
+    };
+
+    return {
+      messages: [solutionResponse],
+      actionHistory: [action],
+      currentStep: "check_resolution",
+    };
+  },
+});
+
+// Node to request more information from the customer
+builder.addNode("request_more_info", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.7,
+    });
+
+    // Generate a request for more information
+    const infoRequestResponse = await model.invoke([
+      ...state.messages,
+      new SystemMessage(`
+        We need more information from the customer to better assist them.
+        Based on what we know so far, ask specific questions to clarify their issue.
+        Be friendly and explain why this information will help us assist them better.
+        
+        Customer Information so far:
+        ${JSON.stringify(state.customerInfo, null, 2)}
+      `),
+    ]);
+
+    // Record the action
+    const action = {
+      action: "request_more_info",
+      timestamp: Date.now(),
+    };
+
+    return {
+      messages: [infoRequestResponse],
+      actionHistory: [action],
+      currentStep: "collect_info", // Go back to collecting info
+    };
+  },
+});
+
+// Node to create a support ticket
+builder.addNode("create_ticket", {
+  execute: async (state) => {
+    // In a real implementation, you would call your ticketing system API
+    // For this example, we'll simulate ticket creation
+    const ticketId = `TICKET-${Date.now().toString().slice(-6)}`;
+
+    // Record the action
+    const action = {
+      action: "create_ticket",
+      timestamp: Date.now(),
+      result: ticketId,
+    };
+
+    const ticketMessage = new AIMessage(
+      `I've created a support ticket for your issue. Your ticket ID is ${ticketId}. ` +
+        `A support representative will follow up with you shortly via email at ${
+          state.customerInfo.email || "your registered email address"
+        }. ` +
+        `Is there anything else I can help you with in the meantime?`
+    );
+
+    return {
+      ticketCreated: true,
+      ticketId,
+      messages: [ticketMessage],
+      actionHistory: [action],
+      currentStep: "check_resolution",
+    };
+  },
+});
+
+// Node to escalate to a human agent
+builder.addNode("escalate", {
+  execute: async (state) => {
+    // Record the action
+    const action = {
+      action: "escalate_to_human",
+      timestamp: Date.now(),
+    };
+
+    const escalationMessage = new AIMessage(
+      `I'll connect you with a human support agent who can better assist you with this issue. ` +
+        `${
+          state.ticketCreated
+            ? `Your ticket ID is ${state.ticketId}.`
+            : "I'll create a ticket for your issue now."
+        } ` +
+        `Please hold while I transfer you. A support representative will be with you shortly.`
+    );
+
+    return {
+      needsHumanEscalation: true,
+      messages: [escalationMessage],
+      actionHistory: [action],
+      currentStep: state.ticketCreated ? "end" : "create_ticket",
+    };
+  },
+});
+
+// Node to check if the issue is resolved
+builder.addNode("check_resolution", {
+  execute: async (state) => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() !== "human") {
+      return {
+        messages: [
+          new AIMessage(
+            "Did that resolve your issue? If not, I can provide additional help or connect you with a human support agent."
+          ),
+        ],
+      };
+    }
+
+    const userMessage = lastMessage.content.toString().toLowerCase();
+
+    // Check if the user indicates the issue is resolved
+    const resolvedIndicators = [
+      "yes",
+      "thank",
+      "resolved",
+      "fixed",
+      "works",
+      "great",
+      "perfect",
+      "solved",
+    ];
+    const unresolvedIndicators = [
+      "no",
+      "not",
+      "still",
+      "issue",
+      "problem",
+      "doesn't",
+      "doesn't work",
+      "help",
+    ];
+
+    const isResolved =
+      resolvedIndicators.some((indicator) => userMessage.includes(indicator)) &&
+      !unresolvedIndicators.some((indicator) =>
+        userMessage.includes(indicator)
+      );
+
+    if (isResolved) {
+      return {
+        messages: [
+          new AIMessage(
+            "I'm glad I could help! Is there anything else you need assistance with today?"
+          ),
+        ],
+        currentStep: "end",
+      };
+    } else {
+      // If not resolved, analyze whether to escalate or try again
+      const model = new ChatOpenAI({
+        modelName: "gpt-4",
+        temperature: 0.2,
+      });
+
+      const nextStepResponse = await model.invoke([
+        ...state.messages,
+        new SystemMessage(`
+          The customer indicates their issue is not resolved.
+          Based on the conversation history, determine the best next step:
+          1. Try another solution
+          2. Request more specific information
+          3. Escalate to a human agent
+          
+          Return your decision as a single word: "retry", "more_info", or "escalate".
+        `),
+      ]);
+
+      const decision = nextStepResponse.content.toString().toLowerCase().trim();
+
+      if (decision.includes("escalate")) {
+        return { currentStep: "escalate" };
+      } else if (decision.includes("more_info")) {
+        return { currentStep: "request_more_info" };
+      } else {
+        return { currentStep: "provide_solution" };
+      }
+    }
+  },
+});
+
+// Final node to end the conversation
+builder.addNode("end_conversation", {
+  execute: async (state) => {
+    // Only add a farewell message if the last message is from the human
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (lastMessage._getType() === "human") {
+      return {
+        messages: [
+          new AIMessage(
+            "Thank you for contacting our support team. If you have any more questions in the future, don't hesitate to reach out. Have a great day!"
+          ),
+        ],
+      };
+    }
+    return {};
+  },
+});
+````
+
+### Step 4: Add Edges to Connect the Nodes
+
+Now, let's connect the nodes with appropriate edges:
+
+```typescript
+// Add edges for the main flow
+builder.addEdge("start", "greeting");
+builder.addEdge("greeting", "collect_info");
+builder.addEdge("collect_info", "retrieve_knowledge");
+builder.addEdge("retrieve_knowledge", "analyze_issue");
+
+// Add conditional edges from analyze_issue
+builder.addConditionalEdges("analyze_issue", (state) => state.currentStep, {
+  provide_solution: "provide_solution",
+  request_more_info: "request_more_info",
+  escalate: "escalate",
+  create_ticket: "create_ticket",
+});
+
+// Connect solution nodes
+builder.addEdge("provide_solution", "check_resolution");
+builder.addEdge("request_more_info", "collect_info");
+builder.addEdge("create_ticket", "check_resolution");
+builder.addEdge("escalate", "create_ticket");
+
+// Connect check_resolution conditionally
+builder.addConditionalEdges("check_resolution", (state) => state.currentStep, {
+  provide_solution: "provide_solution",
+  request_more_info: "request_more_info",
+  escalate: "escalate",
+  end: "end_conversation",
+});
+
+// End the conversation
+builder.addEdge("end_conversation", END);
+```
+
+### Step 5: Compile and Run the Graph
+
+Finally, let's compile and run the graph:
+
+```typescript
+// Compile the graph
+const graph = builder.compile();
+
+// Function to run the support agent
+async function runSupportAgent(userQuery: string) {
+  // Initial state
+  let state = await graph.invoke({
+    messages: [new HumanMessage(userQuery)],
+  });
+
+  console.log("Support agent initialized");
+
+  // Print the conversation
+  for (const message of state.messages) {
+    if (message._getType() === "human") {
+      console.log(`Customer: ${message.content}`);
+    } else if (message._getType() === "ai") {
+      console.log(`Agent: ${message.content}`);
+    }
+  }
+
+  // Check if a ticket was created
+  if (state.ticketCreated) {
+    console.log(`Ticket created: ${state.ticketId}`);
+  }
+
+  // Check if escalated to human
+  if (state.needsHumanEscalation) {
+    console.log("Issue escalated to human agent");
+  }
+
+  return state;
+}
+
+// Run the agent with a sample query
+runSupportAgent(
+  "Hi, I'm having trouble logging into my account. I've tried resetting my password but I'm not receiving the reset email. My email is john@example.com and my account ID is ACC123456."
+).catch(console.error);
+```
+
+## Integration with a Web Application
+
+To integrate this support chatbot with a web application, you can create a simple chat interface:
+
+```tsx
+import React, { useState, useEffect } from "react";
+
+// Chat interface component
+const SupportChat: React.FC = () => {
+  const [messages, setMessages] = useState<
+    { type: "human" | "ai"; content: string }[]
+  >([{ type: "ai", content: "Hello! How can I help you today?" }]);
+  const [input, setInput] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Function to handle user input
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!input.trim()) return;
+
+    // Add user message to chat
+    const userMessage = { type: "human" as const, content: input };
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+
+    try {
+      // Call your LangGraph.js agent here
+      const response = await callSupportAgent(input);
+
+      // Add agent responses to chat
+      const agentMessages = response.messages
+        .filter((msg) => msg._getType() === "ai")
+        .map((msg) => ({
+          type: "ai" as const,
+          content: msg.content.toString(),
+        }));
+
+      setMessages((prev) => [...prev, ...agentMessages]);
+
+      // Handle ticket creation or escalation
+      if (response.ticketCreated) {
+        console.log(`Ticket created: ${response.ticketId}`);
+      }
+
+      if (response.needsHumanEscalation) {
+        // Trigger your human handoff process here
+        console.log("Escalating to human agent...");
+      }
+    } catch (error) {
+      console.error("Error calling support agent:", error);
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: "ai",
+          content: "Sorry, I encountered an error. Please try again later.",
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="support-chat">
+      <div className="chat-messages">
+        {messages.map((message, index) => (
+          <div key={index} className={`message ${message.type}`}>
+            <div className="message-content">{message.content}</div>
+          </div>
+        ))}
+        {isLoading && (
+          <div className="message ai">
+            <div className="message-content">
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <form onSubmit={handleSubmit} className="chat-input">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type your message here..."
+          disabled={isLoading}
+        />
+        <button type="submit" disabled={isLoading}>
+          Send
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default SupportChat;
+```
+
+## Advanced Features
+
+You can extend this example with additional features:
+
+- **Knowledge Base Integration**: Connect to a real vector database for better knowledge retrieval
+- **Ticket System Integration**: Integrate with your actual ticketing system (Zendesk, Freshdesk, etc.)
+- **Live Agent Handoff**: Implement a seamless handoff to human agents
+- **Multi-language Support**: Add language detection and translation capabilities
+- **Customer Sentiment Analysis**: Analyze customer sentiment to prioritize issues
+- **Conversation Analytics**: Track common issues and resolution rates
+- **Proactive Suggestions**: Offer solutions before customers ask
+
+## Conclusion
+
+This example demonstrates how to build an intelligent customer support chatbot using LangGraph.js. The chatbot can understand customer queries, access knowledge bases, handle common support tasks, and escalate to human agents when necessary. By integrating this chatbot with your existing support infrastructure, you can provide faster, more efficient customer service while freeing up your human agents to handle more complex issues.
+
+<CardGroup cols={2}>
+  <Card
+    title="Generative UI Agent"
+    icon="window"
+    href="/langgraph-js/examples/generative-ui-agent"
+  >
+    Build an agent that generates UI components
+  </Card>
+  <Card
+    title="Daily Email Reminder Agent"
+    icon="envelope"
+    href="/langgraph-js/examples/daily-email-reminder"
+  >
+    Create an agent that sends daily email reminders
+  </Card>
+</CardGroup>{" "}

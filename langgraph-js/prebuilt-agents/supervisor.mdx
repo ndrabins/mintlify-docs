@@ -1,0 +1,436 @@
+---
+title: "Supervisor Agent"
+description: "A prebuilt agent that supervises and coordinates other agents"
+---
+
+# LangGraph Supervisor Agent
+
+The Supervisor Agent is a prebuilt agent in LangGraph.js that helps coordinate and manage other agents in a multi-agent system. It acts as an overseer that can delegate tasks, monitor progress, and ensure that complex workflows are executed effectively.
+
+## Overview
+
+The Supervisor pattern is a powerful approach for building complex agent systems. In this pattern:
+
+1. A supervisor agent breaks down complex tasks into smaller subtasks
+2. The supervisor delegates these subtasks to specialized worker agents
+3. Worker agents complete their assigned tasks and report back
+4. The supervisor aggregates results and ensures the overall task is completed
+
+<Frame>
+  <img
+    src="/images/supervisor-agent-diagram.png"
+    alt="Supervisor Agent Architecture"
+  />
+</Frame>
+
+## Use Cases
+
+The Supervisor Agent is particularly useful for:
+
+- Complex workflows requiring multiple specialized agents
+- Tasks that need coordination between different AI capabilities
+- Scenarios where error handling and recovery are important
+- Projects requiring oversight and quality control of agent outputs
+- Systems that need to manage resource allocation between agents
+
+## Installation
+
+To use the Supervisor Agent, you need to install the LangGraph.js package:
+
+```bash
+npm install @langchain/langgraph
+```
+
+## Basic Usage
+
+Here's a simple example of how to use the Supervisor Agent:
+
+```typescript
+import { SupervisorAgent, WorkerAgent } from "@langchain/langgraph/prebuilt";
+import { ChatOpenAI } from "@langchain/openai";
+
+// Create worker agents
+const researchAgent = new WorkerAgent({
+  name: "researcher",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Researches information and provides factual data",
+});
+
+const writerAgent = new WorkerAgent({
+  name: "writer",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Writes creative and engaging content",
+});
+
+const editorAgent = new WorkerAgent({
+  name: "editor",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Edits and improves written content for clarity and accuracy",
+});
+
+// Create the supervisor agent
+const supervisor = new SupervisorAgent({
+  name: "supervisor",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  workers: [researchAgent, writerAgent, editorAgent],
+  verbose: true,
+});
+
+// Run the supervisor with a task
+const result = await supervisor.execute(
+  "Create a well-researched blog post about the impact of AI on healthcare"
+);
+
+console.log("Final result:", result);
+```
+
+## Advanced Configuration
+
+### Customizing the Supervisor
+
+You can customize the supervisor's behavior by providing additional configuration:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  name: "supervisor",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  workers: [researchAgent, writerAgent, editorAgent],
+  maxIterations: 10, // Maximum number of iterations
+  maxWorkerIterations: 3, // Maximum iterations per worker
+  supervisorSystemMessage:
+    "You are a project manager coordinating a team of specialized AI agents...",
+  verbose: true,
+  outputParser: (output) => {
+    // Custom parsing logic for the final output
+    return output.trim();
+  },
+});
+```
+
+### Worker Agent Configuration
+
+Worker agents can be configured with specific capabilities and constraints:
+
+```typescript
+const researchAgent = new WorkerAgent({
+  name: "researcher",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Researches information and provides factual data",
+  systemMessage:
+    "You are a research assistant with expertise in finding accurate information...",
+  tools: [searchTool, databaseQueryTool], // Provide tools for the worker
+  memory: new BufferMemory(), // Add memory to the worker
+  outputParser: (output) => {
+    // Custom parsing logic for this worker's output
+    return { data: JSON.parse(output) };
+  },
+});
+```
+
+## Workflow Patterns
+
+### Sequential Workflow
+
+In a sequential workflow, the supervisor delegates tasks in a specific order:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  workflowPattern: "sequential",
+  workflowSequence: ["researcher", "writer", "editor"],
+});
+```
+
+### Parallel Workflow
+
+In a parallel workflow, the supervisor can delegate tasks to multiple workers simultaneously:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  workflowPattern: "parallel",
+});
+```
+
+### Dynamic Workflow
+
+In a dynamic workflow (the default), the supervisor decides which workers to use based on the task:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  workflowPattern: "dynamic",
+});
+```
+
+## Handling Complex Tasks
+
+The Supervisor Agent excels at breaking down complex tasks into manageable subtasks:
+
+```typescript
+// Complex task example
+const result = await supervisor.execute(`
+  Create a comprehensive market analysis report for a new AI-powered healthcare product with the following components:
+  1. Market overview and current trends
+  2. Competitive landscape analysis
+  3. Target customer segments
+  4. Pricing strategy recommendations
+  5. Go-to-market strategy
+  
+  The report should be data-driven, include relevant statistics, and provide actionable insights.
+`);
+```
+
+## Error Handling and Recovery
+
+The Supervisor Agent includes built-in error handling and recovery mechanisms:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  errorHandling: {
+    retryFailedTasks: true,
+    maxRetries: 3,
+    fallbackStrategies: {
+      // If a worker fails repeatedly, try an alternative approach
+      researcher: (task, error) => {
+        console.log(
+          `Research failed: ${error.message}. Using backup data source.`
+        );
+        return backupResearchAgent.execute(task);
+      },
+    },
+  },
+});
+```
+
+## Monitoring and Debugging
+
+The Supervisor Agent provides tools for monitoring and debugging:
+
+```typescript
+// Enable verbose logging
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  verbose: true,
+  logLevel: "debug",
+});
+
+// Add event listeners for monitoring
+supervisor.on("taskStarted", (data) => {
+  console.log(`Task started: ${data.taskId} assigned to ${data.workerName}`);
+});
+
+supervisor.on("taskCompleted", (data) => {
+  console.log(`Task completed: ${data.taskId} by ${data.workerName}`);
+  console.log(`Result: ${data.result}`);
+});
+
+supervisor.on("error", (error) => {
+  console.error(`Error in supervisor: ${error.message}`);
+});
+```
+
+## Integration with External Systems
+
+The Supervisor Agent can be integrated with external systems:
+
+```typescript
+// Integration with a task management system
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  hooks: {
+    beforeTaskExecution: async (task, workerName) => {
+      // Record task in external system
+      await taskManagementSystem.createTask({
+        description: task,
+        assignee: workerName,
+        status: "in_progress",
+      });
+    },
+    afterTaskExecution: async (task, result, workerName) => {
+      // Update task status in external system
+      await taskManagementSystem.updateTask({
+        description: task,
+        result: result,
+        assignee: workerName,
+        status: "completed",
+      });
+    },
+  },
+});
+```
+
+## Human-in-the-Loop
+
+The Supervisor Agent supports human intervention:
+
+```typescript
+const supervisor = new SupervisorAgent({
+  // ... configuration ...
+  humanIntervention: {
+    enabled: true,
+    interventionPoints: ["task_delegation", "result_review"],
+    interventionHandler: async (state, point) => {
+      if (point === "task_delegation") {
+        // Ask human to approve or modify task delegation
+        const humanFeedback = await promptHuman(
+          `Please review the task delegation plan:\n${JSON.stringify(
+            state.plan,
+            null,
+            2
+          )}\n\nApprove or modify:`
+        );
+        return { ...state, plan: humanFeedback.plan || state.plan };
+      } else if (point === "result_review") {
+        // Ask human to review results
+        const humanFeedback = await promptHuman(
+          `Please review the results:\n${JSON.stringify(
+            state.results,
+            null,
+            2
+          )}\n\nApprove or provide feedback:`
+        );
+        return {
+          ...state,
+          approved: humanFeedback.approved,
+          feedback: humanFeedback.feedback,
+        };
+      }
+      return state;
+    },
+  },
+});
+```
+
+## Best Practices
+
+### Designing Effective Worker Agents
+
+- **Clear Responsibilities**: Each worker should have a clearly defined role and responsibility
+- **Specialized Capabilities**: Equip workers with tools and knowledge specific to their domain
+- **Proper Descriptions**: Provide detailed descriptions to help the supervisor understand when to use each worker
+- **Appropriate Model Selection**: Choose appropriate models for each worker based on their tasks
+
+### Optimizing Supervisor Performance
+
+- **Task Decomposition**: Ensure the supervisor is good at breaking down complex tasks
+- **Clear Instructions**: Provide clear instructions to the supervisor about the overall goal
+- **Iteration Management**: Set appropriate limits on iterations to prevent infinite loops
+- **Error Handling**: Implement robust error handling strategies
+- **Feedback Loops**: Create feedback loops between workers and the supervisor
+
+## Example: Content Creation Pipeline
+
+Here's a complete example of a content creation pipeline using the Supervisor Agent:
+
+```typescript
+import { SupervisorAgent, WorkerAgent } from "@langchain/langgraph/prebuilt";
+import { ChatOpenAI } from "@langchain/openai";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+
+// Create search tool
+const searchTool = new TavilySearchResults({
+  apiKey: process.env.TAVILY_API_KEY,
+});
+
+// Create worker agents
+const researchAgent = new WorkerAgent({
+  name: "researcher",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Researches topics and provides factual information",
+  tools: [searchTool],
+  systemMessage: `You are a research specialist. Your job is to gather accurate and relevant information on topics.
+  Always cite your sources and provide factual, up-to-date information.`,
+});
+
+const outlineAgent = new WorkerAgent({
+  name: "outliner",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Creates structured outlines for content",
+  systemMessage: `You are an outline specialist. Your job is to create well-structured outlines for content.
+  Focus on logical flow, comprehensive coverage, and clear hierarchy.`,
+});
+
+const writerAgent = new WorkerAgent({
+  name: "writer",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description: "Writes engaging and informative content",
+  systemMessage: `You are a content writer. Your job is to create engaging, informative, and well-written content
+  based on research and outlines provided. Focus on clarity, engagement, and value to the reader.`,
+});
+
+const editorAgent = new WorkerAgent({
+  name: "editor",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  description:
+    "Edits and improves content for clarity, accuracy, and engagement",
+  systemMessage: `You are an editor. Your job is to improve content by checking for accuracy, clarity, grammar,
+  and engagement. Provide specific improvements and corrections.`,
+});
+
+// Create the supervisor agent
+const supervisor = new SupervisorAgent({
+  name: "content_manager",
+  llm: new ChatOpenAI({ modelName: "gpt-4" }),
+  workers: [researchAgent, outlineAgent, writerAgent, editorAgent],
+  supervisorSystemMessage: `You are a content manager overseeing a team of specialists who create high-quality content.
+  Your job is to:
+  1. Break down content creation requests into specific tasks
+  2. Assign tasks to the appropriate specialists
+  3. Coordinate the workflow between research, outlining, writing, and editing
+  4. Ensure the final content meets the requirements and is of high quality
+  
+  Available specialists:
+  - researcher: Researches topics and provides factual information
+  - outliner: Creates structured outlines for content
+  - writer: Writes engaging and informative content
+  - editor: Edits and improves content for clarity, accuracy, and engagement`,
+  verbose: true,
+});
+
+// Execute a content creation task
+async function createContent(topic) {
+  console.log(`Starting content creation for topic: ${topic}`);
+
+  const result = await supervisor.execute(
+    `Create a comprehensive, engaging, and informative blog post about "${topic}". 
+    The post should be well-researched, factually accurate, and provide valuable insights to readers.
+    Target length: 1000-1500 words.`
+  );
+
+  console.log("Content creation completed!");
+  return result;
+}
+
+// Run the content creation pipeline
+createContent("The Future of Artificial Intelligence in Healthcare")
+  .then((content) => {
+    console.log("Final content:");
+    console.log(content);
+  })
+  .catch((error) => {
+    console.error("Error creating content:", error);
+  });
+```
+
+## Conclusion
+
+The Supervisor Agent provides a powerful framework for building complex, multi-agent systems in LangGraph.js. By coordinating specialized worker agents, it can tackle sophisticated tasks that would be difficult for a single agent to handle effectively.
+
+<CardGroup cols={2}>
+  <Card
+    title="Multi-Agent Systems"
+    icon="users"
+    href="/langgraph-js/advanced/multi-agent-systems"
+  >
+    Learn more about building multi-agent systems
+  </Card>
+  <Card
+    title="Human-in-the-Loop"
+    icon="user"
+    href="/langgraph-js/advanced/human-in-the-loop"
+  >
+    Explore human-in-the-loop workflows
+  </Card>
+</CardGroup>{" "}

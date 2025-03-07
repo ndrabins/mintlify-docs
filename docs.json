@@ -11,30 +11,6 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
-        "groups": [
-          {
-            "group": "Get Started",
-            "pages": ["introduction", "quickstart", "development"]
-          },
-          {
-            "group": "Essentials",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/settings",
-              "essentials/navigation",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "LangGraph.js",
-            "pages": ["langgraph-js"]
-          }
-        ]
-      },
-      {
         "tab": "LangGraph.js",
         "groups": [
           {
@@ -52,6 +28,10 @@
               "langgraph-js/examples/chatbot-support-agent",
               "langgraph-js/examples/daily-email-reminder"
             ]
+          },
+          {
+            "group": "Prebuilt Agents",
+            "pages": ["langgraph-js/prebuilt-agents/supervisor"]
           },
           {
             "group": "Core Concepts",

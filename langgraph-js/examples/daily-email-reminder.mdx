@@ -1,0 +1,752 @@
+---
+title: "Daily Email Reminder Agent"
+description: "Build an agent that sends personalized daily email reminders"
+---
+
+# Daily Email Reminder Agent
+
+This example demonstrates how to build an agent that sends personalized daily email reminders using LangGraph.js. The agent can generate personalized content, schedule emails, and adapt to user preferences over time.
+
+## Use Case
+
+A daily email reminder agent can be useful for:
+
+- Sending personalized task reminders
+- Delivering daily summaries of news, weather, or other information
+- Providing health and wellness reminders
+- Sending learning materials for courses or training programs
+- Delivering motivational messages or quotes
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+1. Installed LangGraph.js (see [Installation](/langgraph-js/installation))
+2. Set up an OpenAI API key
+3. Access to an email sending service (like SendGrid, Mailgun, or AWS SES)
+4. A way to schedule recurring tasks (like node-cron or a cloud scheduler)
+
+## Implementation
+
+### Step 1: Define the State
+
+First, let's define the state for our email reminder agent:
+
+```typescript
+import { StateGraph, END } from "@langchain/langgraph";
+import { ChatOpenAI } from "@langchain/openai";
+import {
+  HumanMessage,
+  AIMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
+
+// Define user profile type
+type UserProfile = {
+  userId: string;
+  name: string;
+  email: string;
+  preferences: {
+    topics: string[];
+    tone: "formal" | "casual" | "motivational";
+    sendTime: string; // Format: "HH:MM"
+    timezone: string; // e.g., "America/New_York"
+  };
+  history: {
+    sentEmails: {
+      date: string;
+      subject: string;
+      content: string;
+      opened: boolean;
+      clicked: boolean;
+    }[];
+    feedback: {
+      date: string;
+      rating: number;
+      comment?: string;
+    }[];
+  };
+};
+
+// Define the state type
+type EmailReminderState = {
+  messages: (HumanMessage | AIMessage | SystemMessage)[];
+  userProfile: UserProfile;
+  currentDate: string;
+  emailContent: {
+    subject: string;
+    body: string;
+    personalization: Record<string, any>;
+  };
+  emailSent: boolean;
+  emailId?: string;
+  actionHistory: {
+    action: string;
+    timestamp: number;
+    result?: string;
+  }[];
+  currentStep: string;
+};
+```
+
+### Step 2: Create the Graph
+
+Now, let's create the graph with appropriate channels:
+
+```typescript
+const builder = new StateGraph<EmailReminderState>({
+  channels: {
+    messages: {
+      value: (x, y) => [...x, ...y],
+      default: () => [
+        new SystemMessage(
+          "You are an email reminder assistant that generates personalized daily emails. Your goal is to create engaging, relevant content based on user preferences."
+        ),
+      ],
+    },
+    userProfile: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({
+        userId: "",
+        name: "",
+        email: "",
+        preferences: {
+          topics: [],
+          tone: "casual",
+          sendTime: "08:00",
+          timezone: "America/New_York",
+        },
+        history: {
+          sentEmails: [],
+          feedback: [],
+        },
+      }),
+    },
+    currentDate: {
+      value: (x, y) => y,
+      default: () => new Date().toISOString().split("T")[0],
+    },
+    emailContent: {
+      value: (x, y) => ({ ...x, ...y }),
+      default: () => ({
+        subject: "",
+        body: "",
+        personalization: {},
+      }),
+    },
+    emailSent: {
+      value: (x, y) => x || y,
+      default: () => false,
+    },
+    emailId: {
+      value: (x, y) => y || x,
+      default: () => undefined,
+    },
+    actionHistory: {
+      value: (x, y) => [...x, ...y],
+      default: () => [],
+    },
+    currentStep: {
+      value: (x, y) => y,
+      default: () => "load_user_profile",
+    },
+  },
+});
+```
+
+### Step 3: Add Nodes for Email Generation and Sending
+
+Let's add nodes to handle different aspects of email generation and sending:
+
+````typescript
+// Node to load user profile
+builder.addNode("load_user_profile", {
+  execute: async (state) => {
+    // In a real implementation, you would load the user profile from a database
+    // For this example, we'll use a mock user profile
+    const mockUserProfile: UserProfile = {
+      userId: "user123",
+      name: "Alex Johnson",
+      email: "alex@example.com",
+      preferences: {
+        topics: ["productivity", "technology", "health"],
+        tone: "motivational",
+        sendTime: "08:00",
+        timezone: "America/New_York",
+      },
+      history: {
+        sentEmails: [
+          {
+            date: "2023-06-01",
+            subject: "Your Daily Productivity Tips",
+            content: "Here are some productivity tips for today...",
+            opened: true,
+            clicked: true,
+          },
+          {
+            date: "2023-06-02",
+            subject: "Tech News and Productivity Reminder",
+            content: "The latest in tech and your daily reminder...",
+            opened: true,
+            clicked: false,
+          },
+        ],
+        feedback: [
+          {
+            date: "2023-06-01",
+            rating: 4,
+            comment: "Great tips, but would like more specific examples.",
+          },
+        ],
+      },
+    };
+
+    // Record the action
+    const action = {
+      action: "load_user_profile",
+      timestamp: Date.now(),
+      result: `Loaded profile for user: ${mockUserProfile.name}`,
+    };
+
+    return {
+      userProfile: mockUserProfile,
+      actionHistory: [action],
+      currentStep: "analyze_user_preferences",
+    };
+  },
+});
+
+// Node to analyze user preferences and history
+builder.addNode("analyze_user_preferences", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Analyze user preferences and history to determine what content to generate
+    const analysisResponse = await model.invoke([
+      new SystemMessage(`
+        Analyze the user's preferences and email history to determine:
+        1. What topics they engage with most (based on opens and clicks)
+        2. What tone resonates with them
+        3. Any patterns in their feedback
+        4. What content to focus on for today's email
+        
+        User Profile:
+        ${JSON.stringify(state.userProfile, null, 2)}
+        
+        Current Date: ${state.currentDate}
+        
+        Return your analysis as JSON with the following fields:
+        - engagingTopics: string[] (ordered by engagement)
+        - effectiveTone: string
+        - contentFocus: string
+        - personalizationIdeas: object
+      `),
+    ]);
+
+    // Parse the analysis
+    const content = analysisResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let analysis = {
+      engagingTopics: state.userProfile.preferences.topics,
+      effectiveTone: state.userProfile.preferences.tone,
+      contentFocus: "",
+      personalizationIdeas: {},
+    };
+
+    try {
+      analysis = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse analysis:", error);
+    }
+
+    // Record the action
+    const action = {
+      action: "analyze_user_preferences",
+      timestamp: Date.now(),
+      result: `Focus on: ${analysis.contentFocus}`,
+    };
+
+    return {
+      emailContent: {
+        personalization: analysis.personalizationIdeas,
+      },
+      actionHistory: [action],
+      currentStep: "generate_email_content",
+    };
+  },
+});
+
+// Node to generate email content
+builder.addNode("generate_email_content", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.7,
+    });
+
+    // Generate the email content
+    const emailResponse = await model.invoke([
+      new SystemMessage(`
+        Generate a personalized daily email for the user based on their preferences and history.
+        
+        User Profile:
+        ${JSON.stringify(state.userProfile, null, 2)}
+        
+        Current Date: ${state.currentDate}
+        
+        Personalization Ideas:
+        ${JSON.stringify(state.emailContent.personalization, null, 2)}
+        
+        Create an engaging subject line and email body. The email should be concise, valuable, and match the user's preferred tone.
+        
+        Return your response as JSON with the following fields:
+        - subject: string
+        - body: string (HTML format is acceptable)
+      `),
+    ]);
+
+    // Parse the email content
+    const content = emailResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let emailContent = {
+      subject: "",
+      body: "",
+    };
+
+    try {
+      emailContent = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse email content:", error);
+      // Fallback to extracting content without JSON parsing
+      const subjectMatch = content.match(/subject[:\s]+"([^"]+)"/i);
+      const bodyMatch = content.match(/body[:\s]+"([^"]+)"/i);
+
+      if (subjectMatch) emailContent.subject = subjectMatch[1];
+      if (bodyMatch) emailContent.body = bodyMatch[1];
+    }
+
+    // Record the action
+    const action = {
+      action: "generate_email_content",
+      timestamp: Date.now(),
+      result: `Generated email with subject: ${emailContent.subject}`,
+    };
+
+    return {
+      emailContent: {
+        subject: emailContent.subject,
+        body: emailContent.body,
+      },
+      actionHistory: [action],
+      currentStep: "review_email",
+    };
+  },
+});
+
+// Node to review the email before sending
+builder.addNode("review_email", {
+  execute: async (state) => {
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    // Review the email for quality, relevance, and personalization
+    const reviewResponse = await model.invoke([
+      new SystemMessage(`
+        Review the generated email for:
+        1. Quality and engagement
+        2. Relevance to user preferences
+        3. Appropriate personalization
+        4. Any potential improvements
+        
+        User Profile:
+        ${JSON.stringify(state.userProfile, null, 2)}
+        
+        Email Content:
+        Subject: ${state.emailContent.subject}
+        Body: ${state.emailContent.body}
+        
+        Return your review as JSON with the following fields:
+        - quality: number (1-10)
+        - relevance: number (1-10)
+        - personalization: number (1-10)
+        - improvements: string[]
+        - finalVerdict: "approve" or "revise"
+      `),
+    ]);
+
+    // Parse the review
+    const content = reviewResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let review = {
+      quality: 0,
+      relevance: 0,
+      personalization: 0,
+      improvements: [],
+      finalVerdict: "approve",
+    };
+
+    try {
+      review = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse review:", error);
+    }
+
+    // Record the action
+    const action = {
+      action: "review_email",
+      timestamp: Date.now(),
+      result: `Review verdict: ${review.finalVerdict}`,
+    };
+
+    // Determine next step based on review
+    const nextStep =
+      review.finalVerdict === "approve"
+        ? "send_email"
+        : "generate_email_content";
+
+    return {
+      actionHistory: [action],
+      currentStep: nextStep,
+    };
+  },
+});
+
+// Node to send the email
+builder.addNode("send_email", {
+  execute: async (state) => {
+    // In a real implementation, you would call your email service API
+    // For this example, we'll simulate sending an email
+
+    // Generate a mock email ID
+    const emailId = `email-${Date.now().toString().slice(-6)}`;
+
+    // Record the action
+    const action = {
+      action: "send_email",
+      timestamp: Date.now(),
+      result: `Email sent with ID: ${emailId}`,
+    };
+
+    // Log the email details (in a real implementation, you would send the email)
+    console.log(`Sending email to: ${state.userProfile.email}`);
+    console.log(`Subject: ${state.emailContent.subject}`);
+    console.log(`Body: ${state.emailContent.body}`);
+
+    return {
+      emailSent: true,
+      emailId,
+      actionHistory: [action],
+      currentStep: "update_user_history",
+    };
+  },
+});
+
+// Node to update user history after sending email
+builder.addNode("update_user_history", {
+  execute: async (state) => {
+    // In a real implementation, you would update the user's history in your database
+    // For this example, we'll update the state
+
+    const updatedUserProfile = {
+      ...state.userProfile,
+      history: {
+        ...state.userProfile.history,
+        sentEmails: [
+          ...state.userProfile.history.sentEmails,
+          {
+            date: state.currentDate,
+            subject: state.emailContent.subject,
+            content: state.emailContent.body,
+            opened: false,
+            clicked: false,
+          },
+        ],
+      },
+    };
+
+    // Record the action
+    const action = {
+      action: "update_user_history",
+      timestamp: Date.now(),
+      result: `Updated history for user: ${state.userProfile.userId}`,
+    };
+
+    return {
+      userProfile: updatedUserProfile,
+      actionHistory: [action],
+      currentStep: "end",
+    };
+  },
+});
+````
+
+### Step 4: Add Edges to Connect the Nodes
+
+Now, let's connect the nodes with appropriate edges:
+
+```typescript
+// Add edges for the main flow
+builder.addEdge("start", "load_user_profile");
+builder.addEdge("load_user_profile", "analyze_user_preferences");
+builder.addEdge("analyze_user_preferences", "generate_email_content");
+builder.addEdge("generate_email_content", "review_email");
+
+// Add conditional edges from review_email
+builder.addConditionalEdges("review_email", (state) => state.currentStep, {
+  generate_email_content: "generate_email_content",
+  send_email: "send_email",
+});
+
+// Connect remaining nodes
+builder.addEdge("send_email", "update_user_history");
+builder.addEdge("update_user_history", END);
+```
+
+### Step 5: Compile and Run the Graph
+
+Finally, let's compile and run the graph:
+
+```typescript
+// Compile the graph
+const graph = builder.compile();
+
+// Function to run the email reminder agent
+async function runEmailReminderAgent() {
+  // Initial state
+  const state = await graph.invoke({
+    currentDate: new Date().toISOString().split("T")[0],
+  });
+
+  console.log("Email reminder agent completed");
+
+  // Check if email was sent
+  if (state.emailSent) {
+    console.log(`Email sent to: ${state.userProfile.email}`);
+    console.log(`Subject: ${state.emailContent.subject}`);
+    console.log(`Email ID: ${state.emailId}`);
+  } else {
+    console.log("Email was not sent");
+  }
+
+  return state;
+}
+
+// Run the agent
+runEmailReminderAgent().catch(console.error);
+```
+
+## Scheduling the Agent
+
+To run the agent daily, you can use a scheduling library like node-cron:
+
+```typescript
+import cron from "node-cron";
+
+// Schedule the agent to run every day at a specific time
+// This example runs at 7:00 AM every day
+cron.schedule("0 7 * * *", () => {
+  console.log("Running email reminder agent...");
+  runEmailReminderAgent()
+    .then(() => console.log("Email reminder agent completed successfully"))
+    .catch((error) =>
+      console.error("Error running email reminder agent:", error)
+    );
+});
+
+console.log("Email reminder scheduler started");
+```
+
+## Integration with Email Service
+
+To integrate with an actual email service like SendGrid, you would modify the `send_email` node:
+
+```typescript
+import sgMail from "@sendgrid/mail";
+
+// Set your SendGrid API key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+// Node to send the email
+builder.addNode("send_email", {
+  execute: async (state) => {
+    // Prepare the email message
+    const msg = {
+      to: state.userProfile.email,
+      from: "your-email@example.com",
+      subject: state.emailContent.subject,
+      html: state.emailContent.body,
+      trackingSettings: {
+        clickTracking: { enable: true },
+        openTracking: { enable: true },
+      },
+    };
+
+    try {
+      // Send the email
+      const response = await sgMail.send(msg);
+
+      // Generate an email ID
+      const emailId =
+        response[0].headers["x-message-id"] ||
+        `email-${Date.now().toString().slice(-6)}`;
+
+      // Record the action
+      const action = {
+        action: "send_email",
+        timestamp: Date.now(),
+        result: `Email sent with ID: ${emailId}`,
+      };
+
+      return {
+        emailSent: true,
+        emailId,
+        actionHistory: [action],
+        currentStep: "update_user_history",
+      };
+    } catch (error) {
+      console.error("Error sending email:", error);
+
+      // Record the failure
+      const action = {
+        action: "send_email",
+        timestamp: Date.now(),
+        result: `Failed to send email: ${error.message}`,
+      };
+
+      return {
+        emailSent: false,
+        actionHistory: [action],
+        currentStep: "end",
+      };
+    }
+  },
+});
+```
+
+## Handling User Feedback
+
+To improve the emails over time, you can add a node to process user feedback:
+
+````typescript
+// Node to process user feedback
+builder.addNode("process_feedback", {
+  execute: async (state) => {
+    // In a real implementation, you would get feedback from your database
+    // For this example, we'll use mock feedback
+    const mockFeedback = {
+      emailId: state.emailId,
+      rating: 4,
+      comment: "Good email, but I'd like more health-related content.",
+    };
+
+    // Update user profile with feedback
+    const updatedUserProfile = {
+      ...state.userProfile,
+      history: {
+        ...state.userProfile.history,
+        feedback: [
+          ...state.userProfile.history.feedback,
+          {
+            date: state.currentDate,
+            rating: mockFeedback.rating,
+            comment: mockFeedback.comment,
+          },
+        ],
+      },
+    };
+
+    // Analyze feedback to update preferences
+    const model = new ChatOpenAI({
+      modelName: "gpt-4",
+      temperature: 0.2,
+    });
+
+    const analysisResponse = await model.invoke([
+      new SystemMessage(`
+        Analyze the user's feedback and update their preferences accordingly:
+        
+        Current Preferences:
+        ${JSON.stringify(state.userProfile.preferences, null, 2)}
+        
+        Feedback:
+        ${JSON.stringify(mockFeedback, null, 2)}
+        
+        Return updated preferences as JSON.
+      `),
+    ]);
+
+    // Parse the updated preferences
+    const content = analysisResponse.content.toString();
+    const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) ||
+      content.match(/```\n([\s\S]*?)\n```/) || [null, content];
+
+    let updatedPreferences = state.userProfile.preferences;
+
+    try {
+      updatedPreferences = JSON.parse(jsonMatch[1]);
+    } catch (error) {
+      console.error("Failed to parse updated preferences:", error);
+    }
+
+    // Update user profile with new preferences
+    updatedUserProfile.preferences = updatedPreferences;
+
+    // Record the action
+    const action = {
+      action: "process_feedback",
+      timestamp: Date.now(),
+      result: `Processed feedback with rating: ${mockFeedback.rating}`,
+    };
+
+    return {
+      userProfile: updatedUserProfile,
+      actionHistory: [action],
+      currentStep: "end",
+    };
+  },
+});
+````
+
+## Advanced Features
+
+You can extend this example with additional features:
+
+- **A/B Testing**: Test different email formats and content to see what performs better
+- **Dynamic Content**: Include personalized news, weather, or other dynamic content
+- **Multi-channel Delivery**: Send reminders via email, SMS, or push notifications
+- **Smart Scheduling**: Adjust send times based on when users are most likely to engage
+- **Content Recommendations**: Include personalized recommendations based on user behavior
+- **Interactive Elements**: Add interactive elements like polls or quick feedback buttons
+- **Adaptive Learning**: Continuously improve content based on user engagement patterns
+
+## Conclusion
+
+This example demonstrates how to build a daily email reminder agent using LangGraph.js. The agent can generate personalized content, schedule emails, and adapt to user preferences over time. By integrating this agent with your existing systems, you can provide valuable, personalized reminders to your users with minimal manual effort.
+
+<CardGroup cols={2}>
+  <Card
+    title="Generative UI Agent"
+    icon="window"
+    href="/langgraph-js/examples/generative-ui-agent"
+  >
+    Build an agent that generates UI components
+  </Card>
+  <Card
+    title="Chatbot Support Agent"
+    icon="headset"
+    href="/langgraph-js/examples/chatbot-support-agent"
+  >
+    Build a customer support chatbot with LangGraph.js
+  </Card>
+</CardGroup>{" "}
