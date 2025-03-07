@@ -1,0 +1,243 @@
+---
+title: "React useStream Hook"
+description: "Integrate LangGraph.js into your React applications with the useStream hook"
+---
+
+# React useStream Hook
+
+The `useStream()` React hook provides a seamless way to integrate LangGraph.js into your React applications. It handles all the complexities of streaming, state management, and branching logic, letting you focus on building great chat experiences.
+
+## Key Features
+
+- **Messages streaming**: Handle a stream of message chunks to form a complete message
+- **Automatic state management** for messages, loading states, and errors
+- **Conversation branching**: Create alternate conversation paths from any point in the chat history
+- **UI-agnostic design** - bring your own components and styling
+
+## Basic Example
+
+Here's a simple example of how to use the `useStream()` hook in a React application:
+
+```tsx
+"use client";
+
+import { useStream } from "@langchain/langgraph-sdk/react";
+import type { Message } from "@langchain/langgraph-sdk";
+
+export default function ChatApp() {
+  const thread = useStream<{ messages: Message[] }>({
+    apiUrl: "http://localhost:2024",
+    assistantId: "agent",
+    messagesKey: "messages",
+  });
+
+  return (
+    <div className="chat-container">
+      <div className="messages-container">
+        {thread.messages.map((message) => (
+          <div
+            key={message.id}
+            className={`message ${
+              message.type === "human" ? "user-message" : "assistant-message"
+            }`}
+          >
+            {message.content as string}
+          </div>
+        ))}
+      </div>
+
+      <form
+        className="input-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+
+          const form = e.target as HTMLFormElement;
+          const message = new FormData(form).get("message") as string;
+
+          form.reset();
+          thread.submit({ messages: [{ type: "human", content: message }] });
+        }}
+      >
+        <input
+          type="text"
+          name="message"
+          placeholder="Type your message here..."
+          className="message-input"
+        />
+
+        {thread.isLoading ? (
+          <button
+            key="stop"
+            type="button"
+            onClick={() => thread.stop()}
+            className="stop-button"
+          >
+            <Icon icon="stop" iconType="solid" /> Stop
+          </button>
+        ) : (
+          <button key="submit" type="submit" className="send-button">
+            <Icon icon="paper-plane" iconType="solid" /> Send
+          </button>
+        )}
+      </form>
+    </div>
+  );
+}
+```
+
+## Advanced Features
+
+### Loading States
+
+The `isLoading` property tells you when a stream is active, enabling you to show loading indicators, disable input fields during processing, or display a cancel button:
+
+```tsx
+export default function LoadingExample() {
+  const { isLoading, stop } = useStream<{ messages: Message[] }>({
+    apiUrl: "http://localhost:2024",
+    assistantId: "agent",
+    messagesKey: "messages",
+  });
+
+  return (
+    <div>
+      {isLoading && (
+        <div className="loading-indicator">
+          <Icon icon="spinner" iconType="solid" spin={true} size={24} />
+          <span>Processing your request...</span>
+          <button type="button" onClick={() => stop()}>
+            <Icon icon="stop" iconType="solid" /> Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### Thread Management
+
+Keep track of conversations with built-in thread management:
+
+```tsx
+const [threadId, setThreadId] = useState<string | null>(null);
+
+const thread = useStream<{ messages: Message[] }>({
+  apiUrl: "http://localhost:2024",
+  assistantId: "agent",
+  threadId: threadId,
+  onThreadId: setThreadId,
+});
+
+// Store threadId in URL query parameters to let users resume conversations
+useEffect(() => {
+  if (threadId) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("thread", threadId);
+    window.history.pushState({}, "", url);
+  }
+}, [threadId]);
+```
+
+### TypeScript Support
+
+The `useStream()` hook is fully typed to help catch errors early and provide better IDE support:
+
+```tsx
+// Define your types
+type State = {
+  messages: Message[];
+  context?: Record<string, unknown>;
+};
+
+type Update = {
+  messages: Message[] | Message;
+  context?: Record<string, unknown>;
+};
+
+type CustomEvent = {
+  type: "progress" | "debug";
+  payload: unknown;
+};
+
+// Use them with the hook
+const thread = useStream<State, Update, CustomEvent>({
+  apiUrl: "http://localhost:2024",
+  assistantId: "agent",
+  messagesKey: "messages",
+});
+```
+
+If you're using LangGraph.js, you can reuse your graph's annotation types:
+
+```tsx
+import {
+  Annotation,
+  MessagesAnnotation,
+  type StateType,
+  type UpdateType,
+} from "@langchain/langgraph/web";
+
+const AgentState = Annotation.Root({
+  ...MessagesAnnotation.spec,
+  context: Annotation.Optional(Annotation.Any()),
+});
+
+const thread = useStream<
+  StateType<typeof AgentState.spec>,
+  UpdateType<typeof AgentState.spec>
+>({
+  apiUrl: "http://localhost:2024",
+  assistantId: "agent",
+  messagesKey: "messages",
+});
+```
+
+## Event Handling
+
+The `useStream()` hook provides several callback options to help you respond to different events:
+
+```tsx
+const thread = useStream<{ messages: Message[] }>({
+  apiUrl: "http://localhost:2024",
+  assistantId: "agent",
+  messagesKey: "messages",
+
+  // Event handlers
+  onError: (error) => {
+    console.error("Stream error:", error);
+    toast.error("An error occurred while processing your request");
+  },
+  onFinish: () => {
+    console.log("Stream finished");
+    playNotificationSound();
+  },
+  onUpdateEvent: (event) => {
+    console.log("Update event:", event);
+  },
+  onCustomEvent: (event) => {
+    if (event.type === "progress") {
+      updateProgressBar(event.payload);
+    }
+  },
+  onMetadataEvent: (event) => {
+    console.log("Metadata event:", event);
+  },
+});
+```
+
+## Installation
+
+To use the `useStream` hook, you need to install the LangGraph SDK:
+
+```bash
+npm install @langchain/langgraph-sdk
+```
+
+## Learn More
+
+For more information on using LangGraph.js with React, check out these resources:
+
+- [LangGraph.js Documentation](https://langchain-ai.github.io/langgraphjs/)
+- [LangGraph Platform](https://langchain-ai.github.io/langgraph/cloud/)
+- [React Documentation](https://react.dev/)

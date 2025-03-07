@@ -12,9 +12,11 @@
     "tabs": [
       {
         "tab": "LangGraph.js",
+        "icon": "diagram-project",
         "groups": [
           {
             "group": "Getting Started",
+            "icon": "rocket",
             "pages": [
               "langgraph-js/introduction",
               "langgraph-js/installation",
@@ -23,10 +25,12 @@
           },
           {
             "group": "Examples",
+            "icon": "flask",
             "pages": [
               "langgraph-js/examples/generative-ui-agent",
               "langgraph-js/examples/chatbot-support-agent",
-              "langgraph-js/examples/daily-email-reminder"
+              "langgraph-js/examples/daily-email-reminder",
+              "langgraph-js/examples/react-usestream-hook"
             ]
           },
           {
@@ -35,6 +39,7 @@
           },
           {
             "group": "Core Concepts",
+            "icon": "cube",
             "pages": [
               "langgraph-js/core-concepts/state-graph",
               "langgraph-js/core-concepts/channels",
@@ -45,6 +50,7 @@
           },
           {
             "group": "Advanced Features",
+            "icon": "wand-magic-sparkles",
             "pages": [
               "langgraph-js/advanced/branching-merging",
               "langgraph-js/advanced/checkpointing",
@@ -54,6 +60,7 @@
           },
           {
             "group": "Best Practices",
+            "icon": "check-double",
             "pages": [
               "langgraph-js/best-practices/graph-design",
               "langgraph-js/best-practices/performance",
@@ -64,6 +71,7 @@
       },
       {
         "tab": "API Reference",
+        "icon": "code",
         "groups": [
           {
             "group": "API Documentation",
@@ -71,6 +79,7 @@
           },
           {
             "group": "LangGraph.js API",
+            "icon": "puzzle-piece",
             "pages": [
               "langgraph-js/api/state-graph",
               "langgraph-js/api/compiled-graph",
@@ -80,6 +89,7 @@
           },
           {
             "group": "Endpoint Examples",
+            "icon": "server",
             "pages": [
               "api-reference/endpoint/get",
               "api-reference/endpoint/create",
